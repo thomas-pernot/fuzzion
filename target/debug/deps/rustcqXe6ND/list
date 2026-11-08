@@ -1,0 +1,8 @@
+{
+  global:
+    __rustc_proc_macro_decls_b359f3be15b70abe__;
+    rust_metadata_ark_crypto_primitives_macros_b359f3be15b70abe;
+
+  local:
+    *;
+};

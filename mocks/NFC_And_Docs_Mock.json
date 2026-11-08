@@ -1,0 +1,9 @@
+{
+ "nfc_signature_vector": [0.1245, -0.9854, 0.4561, 0.3310, -0.4120, 0.7781, -0.1109, 0.0012],
+ "certified_attributes": {
+    "birth_timestamp": 946684800,
+    "residence_country_iso": 250,
+    "monthly_net_salary_eur": 2450,
+    "document_expiry_timestamp": 1956528000
+ }
+}

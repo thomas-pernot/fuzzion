@@ -1,0 +1,8 @@
+{
+  global:
+    __rustc_proc_macro_decls_b24f3edeeab21d05__;
+    rust_metadata_ark_ff_asm_b24f3edeeab21d05;
+
+  local:
+    *;
+};

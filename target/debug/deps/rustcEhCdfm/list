@@ -1,0 +1,8 @@
+{
+  global:
+    __rustc_proc_macro_decls_fe94bbdce94ddb77__;
+    rust_metadata_enum_ordinalize_derive_fe94bbdce94ddb77;
+
+  local:
+    *;
+};
