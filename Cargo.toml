@@ -1,26 +1,21 @@
 [package]
-name = "humanvault-core"
-version = "1.0.0"
+name = "fuzzion_core"
+version = "0.1.0"
 edition = "2021"
-description = "Moteur cryptographique local Zero-Knowledge et gestionnaire de mémoire étanche No-TEE"
-
-[lib]
-crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 wasm-bindgen = "0.2"
 zeroize = { version = "1.7", features = ["zeroize_derive"] }
-rand = "0.10.3"
-# Optionnel (Recommandé pour l'implémentation 100% Rust via Arkworks en no_std) :
-ark-ff = { version = "0.6.0", default-features = false }
-ark-relations = { version = "0.6.0", default-features = false }
-ark-groth16 = { version = "0.6.0", default-features = false }
-ark-crypto-primitives = { version = "0.6.0", default-features = false, features = ["sponge", "constraints", "crh"] }
+ark-bn254 = "0.4.0"
+ark-serialize = "0.4.0"
+ark-ff = "0.4.0"
+ark-groth16 = "0.4.0"
+ark-relations = "0.4.0"
+ark-std = "0.4.0"
+rand_chacha = "0.3.1"
+rand_core = "0.6.4"
+sha2 = "0.11.1"
+subtle = "2.6.1"
+ark-snark = "0.4.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-[profile.release]
-opt-level = "z"
-lto = true
-codegen-units = 1
-panic = "abort"

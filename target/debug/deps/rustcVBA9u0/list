@@ -1,8 +1,0 @@
-{
-  global:
-    __rustc_proc_macro_decls_f41d8aeb45b4a84__;
-    rust_metadata_ark_serialize_derive_f41d8aeb45b4a84;
-
-  local:
-    *;
-};

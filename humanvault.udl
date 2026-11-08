@@ -1,0 +1,46 @@
+namespace humanvault {
+    boolean validate_zero_point_latency(u32 delta_t_base_ms, u32 measured_latency_ms);
+};
+
+[Error]
+enum HumanVaultError {
+    "BiometricNoiseExceeded",
+    "LatencyThresholdExceeded",
+    "InvalidPredicateOrWitness",
+    "RamZeroizationFailure"
+};
+
+dictionary NativeAuthProofResult {
+    sequence<u8> proof_bytes;
+    boolean ram_purged_0x00;
+};
+
+interface MobileHumanVaultEngine {
+    [Throws=HumanVaultError]
+    constructor();
+
+    [Throws=HumanVaultError]
+    sequence<u8> enroll_with_nfc(
+        sequence<f32> face_master_vector,
+        u64 birth_timestamp,
+        u64 country_iso,
+        u64 salary_net
+    );
+
+    [Throws=HumanVaultError]
+    NativeAuthProofResult prove_attribute(
+        sequence<f32> face_new_vector,
+        u32 delta_t_base_ms,
+        u32 measured_latency_ms,
+        u64 birth_timestamp,
+        u64 country_iso,
+        u64 salary_net,
+        u64 session_challenge,
+        u64 attr_selector,
+        u64 current_timestamp,
+        u64 predicate_mode,
+        u64 threshold_or_target
+    );
+
+    boolean force_native_ram_zeroize();
+};
