@@ -1,5 +1,0 @@
-/home/kali/projects/humanvault-sdk/target/debug/build/serde_json-a4a9ff45eaa6f756/build_script_build-a4a9ff45eaa6f756.d: /home/kali/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.154/build.rs
-
-/home/kali/projects/humanvault-sdk/target/debug/build/serde_json-a4a9ff45eaa6f756/build_script_build-a4a9ff45eaa6f756: /home/kali/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.154/build.rs
-
-/home/kali/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.154/build.rs:
