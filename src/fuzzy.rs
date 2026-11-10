@@ -46,7 +46,7 @@ fn binary_to_gray(n: u8) -> u8 {
 
 /// Encodage Hamming (7,4) d'un nibble de 4 bits en codeword de 7 bits avec bits de parité pour correction d'erreurs
 /// # Arguments
-/// * `d` - nibble de 4 bits (0-15)
+/// * `d` - nibble (demi-octet) de 4 bits (0-15)
 /// # Retour
 /// * codeword de 7 bits (0-127) avec bits de parité pour correction d'erreurs
 /// # Exemple 
@@ -282,12 +282,21 @@ pub fn fuzzy_reconstruct(
 mod tests {
     use super::*;
 
-    // Vérifie que pour chaque cellule, l'index diffère de l'index précédent d'au plus 1 (i.e., la quantification est stable)
+    // Vérifie que pour chaque indice de cellule (idx) 
+    // binary_gray(idx) diffère de binary_gray(idx+1) exactement d'un bit (i.e., la quantification est stable)
     #[test]
     fn test_gray_adjacent_indices_differ_by_one_bit(){
         for idx in 0u8..=254u8{
             let xor_gray_idx = binary_to_gray(idx) ^ binary_to_gray(idx+1);
             assert_eq!(xor_gray_idx.count_ones(), 1, "Cellule instable entre {} (gray code = {:08b}) et {} (gray code = {:08b}) : ", idx, binary_to_gray(idx), idx+1, binary_to_gray(idx+1));
+        }
+    }
+
+    // Vérifie que le décodage de l'encodage d'un nibble (demi-octet) est bien égal au nibble original
+    #[test]
+    fn test_hamming74_encode_decode() {
+        for nibble in 0u8..=15u8 {
+            assert_eq!(hamming74_decode_nibble(hamming74_encode_nibble(nibble)), nibble, "Erreur lors de l'aller-retour sur {} ({:04b})", nibble, nibble);
         }
     }
 
