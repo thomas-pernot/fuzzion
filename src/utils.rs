@@ -39,7 +39,6 @@ pub fn read_nfc_attributes_from_json(
 }
 
 #[cfg(test)]
-
 mod tests {
     use super::*;
 

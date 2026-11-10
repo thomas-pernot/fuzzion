@@ -33,12 +33,6 @@ pub struct EnrollmentOutput {
 /// * QUANT_STEP = 0.05 veut dire que chaque dimension du vecteur biométrique est quantifiée par pas de 0.05
 const QUANT_STEP: f32 = 0.05;
 
-/// Constantes pour le codage Hamming (N, K)
-/// N : nombre total de bits du codeword (7 bits pour Hamming (7,4))
-/// K : nombre de bits de données (4 bits pour un nibble)
-const N : i8 = 7;
-const K : i8 = 4;
-
 
 /// Conversion d'un entier binaire en code Gray
 /// XOR entre le nombre et son décalage à droite de 1 bit
@@ -285,6 +279,11 @@ pub fn fuzzy_reconstruct(
 }
 #[cfg(test)]
 mod tests {
+    /// Constantes pour le codage Hamming (N, K)
+    /// N : nombre total de bits du codeword (7 bits pour Hamming (7,4))
+    /// K : nombre de bits de données (4 bits pour un nibble)
+    const N : u32 = 7;
+    const K : u32 = 4;
     use super::*;
 
     /// Vérifie que pour chaque indice de cellule (idx)
@@ -296,7 +295,7 @@ mod tests {
             assert_eq!(
                 xor_gray_idx.count_ones(),
                 1,
-                "Cellule instable entre {} (gray code = {:08b}) et {} (gray code = {:08b}) : ",
+                "Cellule instable entre {} (gray code = {:08b}) et {} (gray code = {:08b})",
                 idx,
                 binary_to_gray(idx),
                 idx + 1,
