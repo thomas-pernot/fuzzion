@@ -2,11 +2,12 @@ use subtle::ConstantTimeEq;
 use alloc::vec::Vec;
 use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, ZeroizeOnDrop};
+use crate::utils::read_face_vector_from_json;
 
 /// Données publiques d'aide (Helper Data) stockées ou transmises sans risque
 /// # Champs 
-/// grid_offsets : ?
-/// commitment_mask : ?
+/// grid_offsets : offsets pour chaque dimension - ramène les valeurs au centre de la cellule de quantification 
+/// commitment_mask : masque de correction d'erreurs pour chaque dimension - utilisé pour corriger les erreurs lors de l'authentification
 /// key_verification_tag : hash SHA256 de la clé secrète K pour vérification lors de l'authentification
 #[derive(Clone, Debug, Zeroize)]
 pub struct FuzzyHelperData {
@@ -113,6 +114,20 @@ fn hamming74_decode_nibble(mut cw: u8) -> u8 {
     d0 | (d1 << 1) | (d2 << 2) | (d3 << 3)
 }
 
+fn generate_grid_offsets(face_master: &[f32]) -> Vec<f32> {
+    let mut grid_offsets = Vec::with_capacity(face_master.len());
+    for &val in face_master.iter() {
+        // base_idx : numéro de cellule contenant val
+        let base_idx = ((val + 2.0) / QUANT_STEP) as i32;
+        // cell_center : centre de la cellule contenant val (numéro de cellule = base_idx)
+        let cell_center = (base_idx as f32 + 0.5) * QUANT_STEP - 2.0;
+        // val - cell_center : offset pour ramener val au centre de la cellule de quantification
+        grid_offsets.push(val - cell_center);
+    }
+    grid_offsets
+}
+
+
 /// Quantification d'un vecteur de flottants en code de Gray avec décalage (offset) pour chaque dimension
 /// # Arguments
 /// * `vector` - vecteur de flottants à quantifier
@@ -185,15 +200,7 @@ pub fn fuzzy_enroll(face_master: &[f32]) -> Result<EnrollmentOutput, &'static st
     }
     
     // Génération des offsets de grille pour chaque dimension du vecteur biométrique maître
-    let mut grid_offsets = Vec::with_capacity(face_master.len());
-    for &val in face_master.iter() {
-        // base_idx : numéro de cellule contenant val
-        let base_idx = ((val + 2.0) / QUANT_STEP) as i32;
-        // cell_center : centre de la cellule contenant val (numéro de cellule = base_idx)
-        let cell_center = (base_idx as f32 + 0.5) * QUANT_STEP - 2.0;
-        // val - cell_center : offset pour ramener val au centre de la cellule de quantification
-        grid_offsets.push(val - cell_center);
-    }
+    let grid_offsets = generate_grid_offsets(face_master);
     
     // Quantification du vecteur biométrique maître en code de Gray avec les offsets calculés précédemment
     let gray_master = quantize_to_gray(face_master, &grid_offsets);
@@ -275,6 +282,15 @@ pub fn fuzzy_reconstruct(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Vérifie que pour chaque cellule, l'index diffère de l'index précédent d'au plus 1 (i.e., la quantification est stable)
+    #[test]
+    fn test_gray_adjacent_indices_differ_by_one_bit(){
+        for idx in 0u8..=254u8{
+            let xor_gray_idx = binary_to_gray(idx) ^ binary_to_gray(idx+1);
+            assert_eq!(xor_gray_idx.count_ones(), 1, "Cellule instable entre {} (gray code = {:08b}) et {} (gray code = {:08b}) : ", idx, binary_to_gray(idx), idx+1, binary_to_gray(idx+1));
+        }
+    }
 
     #[test]
     fn test_go_no_go_fuzzy_commitment() {
