@@ -33,7 +33,6 @@ pub struct EnrollmentOutput {
 /// * QUANT_STEP = 0.05 veut dire que chaque dimension du vecteur biométrique est quantifiée par pas de 0.05
 const QUANT_STEP: f32 = 0.05;
 
-
 /// Conversion d'un entier binaire en code Gray
 /// XOR entre le nombre et son décalage à droite de 1 bit
 /// # Argument
@@ -282,8 +281,8 @@ mod tests {
     /// Constantes pour le codage Hamming (N, K)
     /// N : nombre total de bits du codeword (7 bits pour Hamming (7,4))
     /// K : nombre de bits de données (4 bits pour un nibble)
-    const N : u32 = 7;
-    const K : u32 = 4;
+    const N: u32 = 7;
+    const K: u32 = 4;
     use super::*;
 
     /// Vérifie que pour chaque indice de cellule (idx)
@@ -307,7 +306,7 @@ mod tests {
     /// Vérifie que le décodage de l'encodage d'un nibble (demi-octet) est bien égal au nibble original
     #[test]
     fn test_hamming74_encode_decode() {
-        for nibble in 0u8..(1<<K) { 
+        for nibble in 0u8..(1 << K) {
             assert_eq!(
                 hamming74_decode_nibble(hamming74_encode_nibble(nibble)),
                 nibble,
@@ -321,9 +320,9 @@ mod tests {
     /// Vérification de correction d'erreur sur un unique bit
     #[test]
     fn test_hamming74_single_bit_noise_correction() {
-        for nibble in 0u8..(1<<K) { 
+        for nibble in 0u8..(1 << K) {
             let cw = hamming74_encode_nibble(nibble);
-            for i in 0..N { 
+            for i in 0..N {
                 let noisy_cw = cw ^ (1 << i);
                 let nibble_corrected = hamming74_decode_nibble(noisy_cw);
                 assert_eq!(
