@@ -1,13 +1,14 @@
 use ark_snark::SNARK;
 use zeroize::Zeroize;
 use ark_bn254::{Bn254, Fr};
-use ark_ff::{Field, PrimeField};
+use ark_ff::PrimeField;
 use ark_groth16::{Groth16, PreparedVerifyingKey, Proof, ProvingKey};
 use ark_relations::{r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable}, lc};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use ark_std::UniformRand;
 use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
+// use arff:Field
+// use ark_std::UniformRand;
 
 /// Nombre de rondes de la permutation Poseidon légère en R1CS (largeur d'état t = 5)
 const POSEIDON_ROUNDS: usize = 8;

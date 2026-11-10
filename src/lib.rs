@@ -5,8 +5,8 @@ pub mod memory;
 pub mod zkp;
 pub mod utils;
 
-use alloc::vec::Vec;
-use ark_bn254::Fr;
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use fuzzy::{fuzzy_enroll, fuzzy_reconstruct, FuzzyHelperData};
-use memory::SecureVaultBuffer;
+// use alloc::vec::Vec;
+// use ark_bn254::Fr;
+// use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+// use fuzzy::{fuzzy_enroll, fuzzy_reconstruct, FuzzyHelperData};
+// use memory::SecureVaultBuffer;
