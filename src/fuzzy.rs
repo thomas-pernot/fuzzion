@@ -33,6 +33,13 @@ pub struct EnrollmentOutput {
 /// * QUANT_STEP = 0.05 veut dire que chaque dimension du vecteur biométrique est quantifiée par pas de 0.05
 const QUANT_STEP: f32 = 0.05;
 
+/// Constantes pour le codage Hamming (N, K)
+/// N : nombre total de bits du codeword (7 bits pour Hamming (7,4))
+/// K : nombre de bits de données (4 bits pour un nibble)
+const N : i8 = 7;
+const K : i8 = 4;
+
+
 /// Conversion d'un entier binaire en code Gray
 /// XOR entre le nombre et son décalage à droite de 1 bit
 /// # Argument
@@ -280,11 +287,11 @@ pub fn fuzzy_reconstruct(
 mod tests {
     use super::*;
 
-    // Vérifie que pour chaque indice de cellule (idx)
-    // binary_gray(idx) diffère de binary_gray(idx+1) exactement d'un bit (i.e., la quantification est stable)
+    /// Vérifie que pour chaque indice de cellule (idx)
+    /// binary_gray(idx) diffère de binary_gray(idx+1) exactement d'un bit (i.e., la quantification est stable)
     #[test]
     fn test_gray_adjacent_indices_differ_by_one_bit() {
-        for idx in 0u8..=254u8 {
+        for idx in 0u8..u8::MAX {
             let xor_gray_idx = binary_to_gray(idx) ^ binary_to_gray(idx + 1);
             assert_eq!(
                 xor_gray_idx.count_ones(),
@@ -298,10 +305,10 @@ mod tests {
         }
     }
 
-    // Vérifie que le décodage de l'encodage d'un nibble (demi-octet) est bien égal au nibble original
+    /// Vérifie que le décodage de l'encodage d'un nibble (demi-octet) est bien égal au nibble original
     #[test]
     fn test_hamming74_encode_decode() {
-        for nibble in 0u8..=15u8 {
+        for nibble in 0u8..(1<<K) { 
             assert_eq!(
                 hamming74_decode_nibble(hamming74_encode_nibble(nibble)),
                 nibble,
@@ -309,6 +316,23 @@ mod tests {
                 nibble,
                 nibble
             );
+        }
+    }
+
+    /// Vérification de correction d'erreur sur un unique bit
+    #[test]
+    fn test_hamming74_single_bit_noise_correction() {
+        for nibble in 0u8..(1<<K) { 
+            let cw = hamming74_encode_nibble(nibble);
+            for i in 0..N { 
+                let noisy_cw = cw ^ (1 << i);
+                let nibble_corrected = hamming74_decode_nibble(noisy_cw);
+                assert_eq!(
+                    nibble_corrected, nibble,
+                    "Erreur sur la correction de {} avec modification du hamming code au bit {} : cw = {:07b}, noisy_cw = {:07b}",
+                    nibble, i, cw, noisy_cw
+                );
+            }
         }
     }
 
