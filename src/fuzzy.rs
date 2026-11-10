@@ -1,11 +1,11 @@
-use subtle::ConstantTimeEq;
 use alloc::vec::Vec;
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Données publiques d'aide (Helper Data) stockées ou transmises sans risque
-/// # Champs 
-/// grid_offsets : offsets pour chaque dimension - ramène les valeurs au centre de la cellule de quantification 
+/// # Champs
+/// grid_offsets : offsets pour chaque dimension - ramène les valeurs au centre de la cellule de quantification
 /// commitment_mask : masque de correction d'erreurs pour chaque dimension - utilisé pour corriger les erreurs lors de l'authentification
 /// key_verification_tag : hash SHA256 de la clé secrète K pour vérification lors de l'authentification
 #[derive(Clone, Debug, Zeroize)]
@@ -28,7 +28,7 @@ pub struct EnrollmentOutput {
 
 /// Constante de quantification pour le codage en code de Gray
 /// Représente la largeur d'une case/cellule de quantification pour chaque dimension du vecteur biométrique
-/// Chaque dimension est ramenée à un numéro de case/cellule 
+/// Chaque dimension est ramenée à un numéro de case/cellule
 /// # Example
 /// * QUANT_STEP = 0.05 veut dire que chaque dimension du vecteur biométrique est quantifiée par pas de 0.05
 const QUANT_STEP: f32 = 0.05;
@@ -49,8 +49,8 @@ fn binary_to_gray(n: u8) -> u8 {
 /// * `d` - nibble (demi-octet) de 4 bits (0-15)
 /// # Retour
 /// * codeword de 7 bits (0-127) avec bits de parité pour correction d'erreurs
-/// # Exemple 
-/// * d = 0b1010 (10) 
+/// # Exemple
+/// * d = 0b1010 (10)
 /// * d0 = 0, d1 = 1, d2 = 0, d3 = 1
 /// * p0 = d0 ^ d1 ^ d3 = 0 ^ 1 ^ 1 = 0
 /// * p1 = d0 ^ d2 ^ d3 = 0 ^ 0 ^ 1 = 1
@@ -126,7 +126,6 @@ fn generate_grid_offsets(face_master: &[f32]) -> Vec<f32> {
     grid_offsets
 }
 
-
 /// Quantification d'un vecteur de flottants en code de Gray avec décalage (offset) pour chaque dimension
 /// # Arguments
 /// * `vector` - vecteur de flottants à quantifier
@@ -176,7 +175,7 @@ fn derive_key_and_tag(raw_seed: &[u8]) -> ([u8; 32], [u8; 32]) {
     // Format attendu par le reste du code
     let mut key = [0u8; 32];
     key.copy_from_slice(&k_digest);
-    
+
     // Actions similaires pour dériver le tag de vérification à partir de la clé K
     let mut hasher_tag = Sha256::new();
     hasher_tag.update(b"HUMANVAULT_TAG_V1:");
@@ -184,7 +183,7 @@ fn derive_key_and_tag(raw_seed: &[u8]) -> ([u8; 32], [u8; 32]) {
     let tag_digest = hasher_tag.finalize();
     let mut tag = [0u8; 32];
     tag.copy_from_slice(&tag_digest);
-    
+
     (key, tag)
 }
 
@@ -197,24 +196,24 @@ pub fn fuzzy_enroll(face_master: &[f32]) -> Result<EnrollmentOutput, &'static st
     if face_master.len() < 8 {
         return Err("Le vecteur biométrique doit comporter au moins 8 dimensions");
     }
-    
+
     // Génération des offsets de grille pour chaque dimension du vecteur biométrique maître
     let grid_offsets = generate_grid_offsets(face_master);
-    
+
     // Quantification du vecteur biométrique maître en code de Gray avec les offsets calculés précédemment
     let gray_master = quantize_to_gray(face_master, &grid_offsets);
-    
-    // Hash du code Gray quantifié (master_digest) 
+
+    // Hash du code Gray quantifié (master_digest)
     let mut seed_hasher = Sha256::new();
     seed_hasher.update(b"HUMANVAULT_MASTER_SEED:");
     seed_hasher.update(&gray_master);
     let master_digest = seed_hasher.finalize();
-    
+
     // commitment_mask : utilisé pour corriger les erreurs lors de l'authentification
     let mut commitment_mask = Vec::with_capacity(gray_master.len());
     // canonical_seed : utilisé plus tard pour dériver la clé secrète K et le tag de vérification
     let mut canonical_seed = Vec::with_capacity(gray_master.len());
-    
+
     // Génération du commitment mask et de la canonical seed à partir du code Gray et de son digest
     for (i, &g_byte) in gray_master.iter().enumerate() {
         // nibble : 4 bits dérivés du digest maître pour introduire de l'aléatoire dans la graine canonique
@@ -225,12 +224,12 @@ pub fn fuzzy_enroll(face_master: &[f32]) -> Result<EnrollmentOutput, &'static st
         // commitment_mask : concaténation des XOR entre le codeword et le code Gray quantifié (g_byte) pour chaque dimension
         commitment_mask.push(codeword ^ g_byte);
     }
-    
+
     // Dérivation de la clé secrète K et du tag de vérification à partir de la graine canonique
     let (secret_key, key_verification_tag) = derive_key_and_tag(&canonical_seed);
     // Zéroïsation de la graine canonique pour éviter toute fuite de données sensibles
     canonical_seed.zeroize();
-    
+
     Ok(EnrollmentOutput {
         secret_key,
         helper_data: FuzzyHelperData {
@@ -246,15 +245,14 @@ pub fn fuzzy_reconstruct(
     face_new: &[f32],
     helper: &FuzzyHelperData,
 ) -> Result<[u8; 32], &'static str> {
-    if face_new.len() != helper.commitment_mask.len()
-        || face_new.len() != helper.grid_offsets.len()
+    if face_new.len() != helper.commitment_mask.len() || face_new.len() != helper.grid_offsets.len()
     {
         return Err("Dimension du vecteur incompatible avec le Helper Data");
     }
-    
+
     let mut gray_new = quantize_to_gray(face_new, &helper.grid_offsets);
     let mut recovered_seed = Vec::with_capacity(face_new.len());
-    
+
     for (i, &g_byte) in gray_new.iter().enumerate() {
         // Récupération du codeword bruité en XORant le code Gray quantifié avec le commitment mask
         let noisy_codeword = helper.commitment_mask[i] ^ g_byte;
@@ -262,14 +260,14 @@ pub fn fuzzy_reconstruct(
         let corrected_nibble = hamming74_decode_nibble(noisy_codeword);
         recovered_seed.push(corrected_nibble);
     }
-    
+
     // Zéroïsation du vecteur quantifié pour éviter toute fuite de données sensibles
     gray_new.zeroize();
     // Récupération de la clé secrète K et du tag de vérification à partir de la graine récupérée
     let (mut candidate_key, candidate_tag) = derive_key_and_tag(&recovered_seed);
     // Zéroïsation de la graine récupérée pour éviter toute fuite de données sensibles
     recovered_seed.zeroize();
-    
+
     // Comparaison du tag de vérification calculé avec celui stocké dans le Helper Data pour valider la reconstruction
     if bool::from(candidate_tag.ct_eq(&helper.key_verification_tag)) {
         Ok(candidate_key)
@@ -282,13 +280,21 @@ pub fn fuzzy_reconstruct(
 mod tests {
     use super::*;
 
-    // Vérifie que pour chaque indice de cellule (idx) 
+    // Vérifie que pour chaque indice de cellule (idx)
     // binary_gray(idx) diffère de binary_gray(idx+1) exactement d'un bit (i.e., la quantification est stable)
     #[test]
-    fn test_gray_adjacent_indices_differ_by_one_bit(){
-        for idx in 0u8..=254u8{
-            let xor_gray_idx = binary_to_gray(idx) ^ binary_to_gray(idx+1);
-            assert_eq!(xor_gray_idx.count_ones(), 1, "Cellule instable entre {} (gray code = {:08b}) et {} (gray code = {:08b}) : ", idx, binary_to_gray(idx), idx+1, binary_to_gray(idx+1));
+    fn test_gray_adjacent_indices_differ_by_one_bit() {
+        for idx in 0u8..=254u8 {
+            let xor_gray_idx = binary_to_gray(idx) ^ binary_to_gray(idx + 1);
+            assert_eq!(
+                xor_gray_idx.count_ones(),
+                1,
+                "Cellule instable entre {} (gray code = {:08b}) et {} (gray code = {:08b}) : ",
+                idx,
+                binary_to_gray(idx),
+                idx + 1,
+                binary_to_gray(idx + 1)
+            );
         }
     }
 
@@ -296,7 +302,13 @@ mod tests {
     #[test]
     fn test_hamming74_encode_decode() {
         for nibble in 0u8..=15u8 {
-            assert_eq!(hamming74_decode_nibble(hamming74_encode_nibble(nibble)), nibble, "Erreur lors de l'aller-retour sur {} ({:04b})", nibble, nibble);
+            assert_eq!(
+                hamming74_decode_nibble(hamming74_encode_nibble(nibble)),
+                nibble,
+                "Erreur lors de l'aller-retour sur {} ({:04b})",
+                nibble,
+                nibble
+            );
         }
     }
 
@@ -304,27 +316,25 @@ mod tests {
     fn test_go_no_go_fuzzy_commitment() {
         // Vecteur biométrique maître issu de Face_Mock_Enroll.json
         let face_master = [
-            0.4512, 0.8954, -0.1245, 0.6721, -0.3318, 0.2190, 0.5541, -0.7845
+            0.4512, 0.8954, -0.1245, 0.6721, -0.3318, 0.2190, 0.5541, -0.7845,
         ];
-        
+
         // Vecteur bruité issu de Face_Mock_Auth.json (Nouvelle capture)
         let face_new = [
-            0.4515, 0.8951, -0.1240, 0.6718, -0.3321, 0.2194, 0.5538, -0.7841
+            0.4515, 0.8951, -0.1240, 0.6718, -0.3321, 0.2194, 0.5538, -0.7841,
         ];
 
         // 1. ENRÔLEMENT : Création de la clé originelle et du Helper Data
-        let enrollment = fuzzy_enroll(&face_master)
-            .expect("Erreur : l'enrôlement a échoué");
+        let enrollment = fuzzy_enroll(&face_master).expect("Erreur : l'enrôlement a échoué");
         let original_key = enrollment.secret_key;
-        
+
         // 2. AUTHENTIFICATION : Tentative de reconstruction de la clé avec le vecteur bruité
         let reconstructed_key = fuzzy_reconstruct(&face_new, &enrollment.helper_data)
             .expect("Échec du Go/No-Go : Le bruit biométrique n'a pas pu être corrigé");
 
         // 3. VERDICT : Comparaison stricte des 32 octets
         assert_eq!(
-            original_key, 
-            reconstructed_key, 
+            original_key, reconstructed_key,
             "NO-GO : La clé reconstruite n'est pas identique à l'originale au bit près !"
         );
     }

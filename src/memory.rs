@@ -72,7 +72,7 @@ mod tests {
         let secret_key = [0xbe, 0x8e, 0x02, 0x46, 0xc4, 0x12, 0x40, 0xaa];
         assert_eq!(vault.write_bytes(&secret_key), 8);
         assert_eq!(vault.as_slice()[0], 0xbe);
-        assert_eq!(vault.as_slice().len(), 8*4);
+        assert_eq!(vault.as_slice().len(), 8 * 4);
         assert!(vault.zeroize_deterministic());
         assert_eq!(vault.as_slice().len(), 0); // /!\ Le tampon est vidé !!
         assert!(vault.as_slice().iter().all(|&b| b == 0x00));

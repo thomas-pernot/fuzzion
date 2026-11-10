@@ -7,7 +7,7 @@ pub type NfcSignatureVector = Vec<f32>;
 #[derive(Deserialize)]
 pub struct FaceVectorFile {
     #[serde(alias = "face_master_vector", alias = "face_new_vector")]
-    pub face_vector: FaceVector
+    pub face_vector: FaceVector,
 }
 
 #[derive(Deserialize)]
@@ -15,13 +15,13 @@ pub struct NfcCertifiedAttributes {
     pub birth_timestamp: i128,
     pub residence_country_iso: u16,
     pub monthly_net_salary_eur: i128,
-    pub document_expiry_timestamp: i128
+    pub document_expiry_timestamp: i128,
 }
 
 #[derive(Deserialize)]
 pub struct NfcAttributesFile {
     pub nfc_signature_vector: NfcSignatureVector,
-    pub certified_attributes: NfcCertifiedAttributes
+    pub certified_attributes: NfcCertifiedAttributes,
 }
 
 pub fn read_face_vector_from_json(file_path: &str) -> Result<FaceVector, Box<dyn Error>> {
@@ -30,7 +30,9 @@ pub fn read_face_vector_from_json(file_path: &str) -> Result<FaceVector, Box<dyn
     Ok(file.face_vector)
 }
 
-pub fn read_nfc_attributes_from_json(file_path: &str) -> Result<(NfcSignatureVector, NfcCertifiedAttributes), Box<dyn Error>> {
+pub fn read_nfc_attributes_from_json(
+    file_path: &str,
+) -> Result<(NfcSignatureVector, NfcCertifiedAttributes), Box<dyn Error>> {
     let json_content = fs::read_to_string(file_path)?;
     let file: NfcAttributesFile = serde_json::from_str(&json_content)?;
     Ok((file.nfc_signature_vector, file.certified_attributes))
@@ -52,11 +54,12 @@ mod tests {
         let face_auth_vector = read_face_vector_from_json(auth_path).unwrap();
         assert_eq!(face_auth_vector.len(), 8);
     }
-    
+
     #[test]
     fn test_read_nfc_attributes_from_json() {
         let nfc_path = concat!(env!("CARGO_MANIFEST_DIR"), "/mocks/NFC_And_Docs_Mock.json");
-        let (nfc_signature_vector, certified_attributes) = read_nfc_attributes_from_json(nfc_path).unwrap();
+        let (nfc_signature_vector, certified_attributes) =
+            read_nfc_attributes_from_json(nfc_path).unwrap();
         assert_eq!(nfc_signature_vector.len(), 8);
         assert_eq!(nfc_signature_vector[0], 0.1245);
         assert_eq!(certified_attributes.birth_timestamp, 946684800);
@@ -65,4 +68,3 @@ mod tests {
         assert_eq!(certified_attributes.document_expiry_timestamp, 1956528000);
     }
 }
-

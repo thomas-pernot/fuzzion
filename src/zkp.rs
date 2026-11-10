@@ -1,12 +1,15 @@
-use ark_snark::SNARK;
-use zeroize::Zeroize;
 use ark_bn254::{Bn254, Fr};
 use ark_ff::PrimeField;
 use ark_groth16::{Groth16, PreparedVerifyingKey, Proof, ProvingKey};
-use ark_relations::{r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable}, lc};
+use ark_relations::{
+    lc,
+    r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable},
+};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use ark_snark::SNARK;
 use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
+use zeroize::Zeroize;
 // use arff:Field
 // use ark_std::UniformRand;
 
@@ -112,11 +115,7 @@ fn enforce_u64_range(
         let bit_var = cs.new_witness_variable(|| Ok(bit_fr))?;
 
         // Contrainte de booléanité : bit * (1 - bit) = 0
-        cs.enforce_constraint(
-            lc!() + bit_var,
-            lc!() + Variable::One - bit_var,
-            lc!(),
-        )?;
+        cs.enforce_constraint(lc!() + bit_var, lc!() + Variable::One - bit_var, lc!())?;
 
         reconstructed = reconstructed + (coeff, bit_var);
         coeff = coeff + coeff;
@@ -272,7 +271,8 @@ impl ConstraintSynthesizer<Fr> for HumanVaultUniversalCircuit {
         let age_delta_u64 = self
             .current_timestamp
             .wrapping_sub(self.witness.birth_timestamp);
-        let age_delta_fr = Fr::from(self.current_timestamp) - Fr::from(self.witness.birth_timestamp);
+        let age_delta_fr =
+            Fr::from(self.current_timestamp) - Fr::from(self.witness.birth_timestamp);
         let age_delta_var = cs.new_witness_variable(|| Ok(age_delta_fr))?;
         cs.enforce_constraint(
             lc!() + pub_current_ts_var - birth_var,
