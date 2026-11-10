@@ -2,7 +2,6 @@ use subtle::ConstantTimeEq;
 use alloc::vec::Vec;
 use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, ZeroizeOnDrop};
-use crate::utils::read_face_vector_from_json;
 
 /// Données publiques d'aide (Helper Data) stockées ou transmises sans risque
 /// # Champs 
