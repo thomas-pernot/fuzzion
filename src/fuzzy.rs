@@ -532,49 +532,71 @@ mod tests {
         // Génération d'un RNG à partir d'une graine fixe
         let seed= 42;
         let mut rng = StdRng::seed_from_u64(seed);
-        // Initialisation des compteurs (réussite/échec)
-        let mut num_pass = 0;
-        let mut num_fail = 0;
+        // Déclaration des compteurs (réussite/échec)
+        let mut num_pass;
+        let mut num_clean_fail;
+        let mut num_bad_fail;
         // Boucle sur le nombre k de bits inversés
         for num_inv_bits in 1..=8{
-            // Modification de gray_noisy sur k positions (k bits inversés)
-            let gray_noisy = add_noise(&gray_master, num_inv_bits, &mut rng);
-            // Formatage pour les println! plus tard
-            let gray_noisy_bin: String = gray_noisy
-                .iter()
-                .map(|byte| format!("{:08b}", byte))
-                .collect::<Vec<String>>()
-                .join(" ");
-            //Reconstruction de face_noisy (à partir de gray_noisy, déquantification)
-            let face_noisy = dequantize(&gray_noisy, &grid_offsets);
-            // Authentification
-            let authentification = fuzzy_reconstruct(&face_noisy, &enrollment.helper_data);
+            // Initialisation des compteurs
+            num_pass = 0;
+            num_clean_fail = 0;
+            num_bad_fail = 0;
+            // Boucle interne de 1000 échantillons
+            for _ in 1..=1000{
+                // Modification de gray_noisy sur k positions (k bits inversés)
+                let gray_noisy = add_noise(&gray_master, num_inv_bits, &mut rng);
+                // Check qu'on a bien k bits différents entre gray_noisy et gray_master
+                let num_diff_bits : u32 = gray_noisy
+                    .iter()
+                    .zip(gray_master.iter())
+                    .map(|(byte_noisy, byte_master)| (byte_noisy ^ byte_master).count_ones())
+                    .sum();
+                assert_eq!(
+                    num_diff_bits,
+                    num_inv_bits as u32,
+                    "Le nombre de bits inversés n'est pas cohérent"
+                );
+                // Formatage pour les println! plus tard
+                let gray_noisy_bin: String = gray_noisy
+                    .iter()
+                    .map(|byte| format!("{:08b}", byte))
+                    .collect::<Vec<String>>()
+                    .join(" ");
+                //Reconstruction de face_noisy (à partir de gray_noisy, déquantification)
+                let face_noisy = dequantize(&gray_noisy, &grid_offsets);
+                // Authentification
+                let authentification = fuzzy_reconstruct(&face_noisy, &enrollment.helper_data);
 
-            match authentification{
-                Ok(reconstructed_key) => {
-                    if reconstructed_key == original_key{
-                        num_pass += 1;
-                        println!("Clé reconstruite au bit près pour {num_inv_bits} bits modifiés \n
-                            gray_master : {gray_master_bin} \n
-                            gray_noisy : {gray_noisy_bin} \n
-                        ")
+                //println!("\n------------- Tests sur {num_inv_bits} bits modifiés -------------\n");
+                match authentification{
+                    Ok(reconstructed_key) => {
+                        if reconstructed_key == original_key{
+                            num_pass += 1;
+                            //println!("Clé reconstruite au bit près")
+                        }
+                        else {
+                            num_bad_fail += 1;
+                            // println!("Erreur : La clé reconstruite diffère de la clé originale \n
+                            //     gray_master : {gray_master_bin} \n
+                            //     gray_noisy : {gray_noisy_bin} \n
+                            // ")
+                        }
+                    },
+                    Err(_) => {
+                        num_clean_fail += 1;
+                        //println!("Erreur : la clé n'a pas pu être reconstruite");
                     }
-                    else {
-                        num_fail += 1;
-                        println!("Erreur : La clé reconstruite diffère de la clé originale ({num_inv_bits} bits modifiés) \n
-                            gray_master : {gray_master_bin} \n
-                            gray_noisy : {gray_noisy_bin} \n
-                        ")
-                    }
-                },
-                Err(_) => {
-                    num_fail += 1;
-                    println!("Erreur : la clé n'a pas pu être reconstruite");
                 }
             }
-            let num_total = num_fail + num_pass;
-            println!("================== Résultats pour une modification de {num_inv_bits} bits ==================");
-            println!(" Réussites : {num_pass}/{num_total}, Echecs : {num_fail}/{num_total}");
+            let num_total = num_clean_fail + num_pass + num_bad_fail;
+            println!("================== Résultats pour une modification de {num_inv_bits} bits ({num_total} échantillons) ==================");
+            println!("Réussites : {num_pass}/{num_total}, Echecs clean : {num_clean_fail}/{num_total}, Echecs anormaux : {num_bad_fail}/{num_total}");
+            let success_rate = (num_pass as f64 / num_total as f64) * 100.0;
+            println!("Pourcentage de réussite : {:.2} %\n", success_rate);
+            //assert_eq!(num_pass, num_total)
         }
+        
+
     }
 }
