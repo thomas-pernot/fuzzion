@@ -307,6 +307,8 @@ mod tests {
     /// Très petite devant une demi-case (0,025) : une erreur d'arrondi ne peut pas
     /// faire changer de case, mais une vraie erreur de formule serait détectée.
     const FLOAT_TOLERANCE: f32 = 1e-5;
+    // Nombre d'itération dans les boucles de test
+    const NUM_TEST: u32 = 1000;
     
     use super::*;
     use crate::utils::read_face_vector_from_json;
@@ -493,7 +495,8 @@ mod tests {
     }
 
     fn add_noise(w: &[u8], num_inv_bits: u8, rng : &mut StdRng) -> Vec<u8> {
-        assert!(num_inv_bits<64, "num_inv_bits trop grand : {num_inv_bits}");
+        let total_bits = w.len() as u8 * 8;
+        assert!(num_inv_bits<total_bits, "num_inv_bits trop grand : {num_inv_bits}");
         let mut noisy_w = w.to_vec();
         let total_bits = noisy_w.len() * 8;
 
@@ -524,11 +527,11 @@ mod tests {
         // (Re)génération de gray_master (déjà créé dans fuzzy_enroll())
         let gray_master = quantize_to_gray(&face_master, &grid_offsets);
         // Formatage pour les println! plus tard
-        let gray_master_bin: String = gray_master
-            .iter()
-            .map(|byte| format!("{:08b}", byte))
-            .collect::<Vec<String>>()
-            .join(" ");
+        // let gray_master_bin: String = gray_master
+        //     .iter()
+        //     .map(|byte| format!("{:08b}", byte))
+        //     .collect::<Vec<String>>()
+        //     .join(" ");
         // Génération d'un RNG à partir d'une graine fixe
         let seed= 42;
         let mut rng = StdRng::seed_from_u64(seed);
@@ -537,13 +540,13 @@ mod tests {
         let mut num_clean_fail;
         let mut num_bad_fail;
         // Boucle sur le nombre k de bits inversés
-        for num_inv_bits in 1..=8{
+        for num_inv_bits in 0..=8{
             // Initialisation des compteurs
             num_pass = 0;
             num_clean_fail = 0;
             num_bad_fail = 0;
             // Boucle interne de 1000 échantillons
-            for _ in 1..=1000{
+            for _ in 1..=NUM_TEST{
                 // Modification de gray_noisy sur k positions (k bits inversés)
                 let gray_noisy = add_noise(&gray_master, num_inv_bits, &mut rng);
                 // Check qu'on a bien k bits différents entre gray_noisy et gray_master
@@ -557,12 +560,7 @@ mod tests {
                     num_inv_bits as u32,
                     "Le nombre de bits inversés n'est pas cohérent"
                 );
-                // Formatage pour les println! plus tard
-                let gray_noisy_bin: String = gray_noisy
-                    .iter()
-                    .map(|byte| format!("{:08b}", byte))
-                    .collect::<Vec<String>>()
-                    .join(" ");
+                
                 //Reconstruction de face_noisy (à partir de gray_noisy, déquantification)
                 let face_noisy = dequantize(&gray_noisy, &grid_offsets);
                 // Authentification
@@ -577,6 +575,12 @@ mod tests {
                         }
                         else {
                             num_bad_fail += 1;
+                            // Formatage pour l'affichage
+                            // let gray_noisy_bin: String = gray_noisy
+                            //     .iter()
+                            //     .map(|byte| format!("{:08b}", byte))
+                            //     .collect::<Vec<String>>()
+                            //     .join(" ");
                             // println!("Erreur : La clé reconstruite diffère de la clé originale \n
                             //     gray_master : {gray_master_bin} \n
                             //     gray_noisy : {gray_noisy_bin} \n
@@ -594,7 +598,10 @@ mod tests {
             println!("Réussites : {num_pass}/{num_total}, Echecs clean : {num_clean_fail}/{num_total}, Echecs anormaux : {num_bad_fail}/{num_total}");
             let success_rate = (num_pass as f64 / num_total as f64) * 100.0;
             println!("Pourcentage de réussite : {:.2} %\n", success_rate);
-            //assert_eq!(num_pass, num_total)
+            match num_inv_bits {
+                0 | 1 => assert_eq!(num_pass, num_total, "Taux de 100% de réussite non-atteint pour num_inv_bits = {num_inv_bits}"),
+                _ => assert_eq!(num_bad_fail, 0, "Echec anormal détecté")
+            }
         }
         
 
