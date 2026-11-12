@@ -50,22 +50,6 @@ fn binary_to_gray(n: u8) -> u8 {
     n ^ (n >> 1)
 }
 
-/// Conversion d'un entier en code Gray en entier binaire
-/// # Argument
-/// * `y` - entier Gray (0-255)
-/// # Retour
-/// * entier binaire correspondant (0-255)
-#[inline]
-fn gray_to_binary(y: u8) -> u8 {
-    let mut n = y;
-    let mut shift = 1;
-    while shift < 8 {
-        n ^= n >> shift;
-        shift <<= 1;
-    }
-    n
-}
-
 /// Encodage Hamming (7,4) d'un nibble de 4 bits en codeword de 7 bits avec bits de parité pour correction d'erreurs
 /// # Arguments
 /// * `d` - nibble (demi-octet) de 4 bits (0-15)
@@ -319,7 +303,12 @@ mod tests {
     /// K : nombre de bits de données (4 bits pour un nibble)
     const N: u32 = 7;
     const K: u32 = 4;
+    /// Tolérance pour comparer des flottants reconstruits.
+    /// Très petite devant une demi-case (0,025) : une erreur d'arrondi ne peut pas
+    /// faire changer de case, mais une vraie erreur de formule serait détectée.
+    const FLOAT_TOLERANCE: f32 = 1e-5;
     use super::*;
+    use crate::utils::read_face_vector_from_json;
 
     /// Vérifie que pour chaque indice de cellule (idx)
     /// binary_gray(idx) diffère de binary_gray(idx+1) exactement d'un bit (i.e., la quantification est stable)
@@ -339,11 +328,92 @@ mod tests {
         }
     }
 
+    /// Conversion d'un entier en code Gray en entier binaire
+    /// # Argument
+    /// * `y` - entier Gray (0-255)
+    /// # Retour
+    /// * entier binaire correspondant (0-255)
+    #[inline]
+    fn gray_to_binary(y: u8) -> u8 {
+        let mut n = y;
+        let mut shift = 1;
+        while shift < 8 {
+            n ^= n >> shift;
+            shift <<= 1;
+        }
+        n
+    }
+
+    /// Déquantification d'un vecteur de bytes en code de Gray en flottants avec décalage (offset) pour chaque dimension
+    /// # Arguments
+    /// * `w` - vecteur de bytes quantifiés en code de Gray
+    /// * `offsets` - vecteur de décalages pour chaque dimension pour ramener
+    /// les valeurs au centre de la plage de quantification
+    /// # Retour
+    /// * vecteur de flottants déquantifiés
+    fn dequantize(w: &[u8], offsets: &[f32]) -> Vec<f32> {
+        let mut out = Vec::with_capacity(w.len());
+        for (i, &val_byte) in w.iter().enumerate() {
+            // Numéro de cellule contenant val_byte après conversion Gray -> Binaire
+            let idx = gray_to_binary(val_byte) as i32;
+            // Centre de la cellule
+            let cell_center = find_cell_center(idx);
+            // Récupération de l'offset
+            let offset = offsets.get(i).copied().unwrap_or(0.0);
+            // Valeur réelle
+            let val = cell_center + offset;
+            out.push(val);
+        }
+        out
+    }
+
     /// Vérifie que la conversion binaire -> Gray -> binaire est bien l'identité pour tous les indices de cellule (0-255)
     #[test]
     fn test_gray_to_binary() {
-        for idx in 0u8..u8::MAX {
+        for idx in 0u8..=u8::MAX {
             assert_eq!(gray_to_binary(binary_to_gray(idx)), idx);
+        }
+    }
+
+    /// Vérifie sur le mock d'enrôlement que :
+    /// 1. dequantize puis quantize redonne le même w (aller-retour sur les octets) ;
+    /// 2. dequantize redonne le vecteur facial d'origine, à FLOAT_TOLERANCE près
+    ///    (car à l'enrôlement, valeur = centre de case + offset).
+    #[test]
+    fn test_quantize_dequantize_mock() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/mocks/Face_Mock_Enroll.json");
+        let face_master = read_face_vector_from_json(path).unwrap();
+        let offsets = generate_grid_offsets(&face_master);
+        let w = quantize_to_gray(&face_master, &offsets);
+        let reconstructed = dequantize(&w, &offsets);
+
+        assert_eq!(
+            quantize_to_gray(&reconstructed, &offsets),
+            w,
+            "L'aller-retour dequantize -> quantize ne redonne pas w"
+        );
+
+        for (i, (&original, &rebuilt)) in face_master.iter().zip(reconstructed.iter()).enumerate() {
+            let gap = (original - rebuilt).abs();
+            assert!(
+                gap < FLOAT_TOLERANCE,
+                "Dimension {i} : original = {original}, reconstruit = {rebuilt}, écart = {gap:e}"
+            );
+        }
+    }
+
+    /// Vérifie que la quantification et la déquantification sur 
+    /// chaque valeur d’octet dans chaque dimension d'un vecteur biométrique maître sont cohérentes
+    /// (les dimensions étant indépendantes)
+    #[test]
+    fn test_quantize_dequantize_all(){
+        let mut w = [0; 8];
+        let offsets = generate_grid_offsets(&read_face_vector_from_json(concat!(env!("CARGO_MANIFEST_DIR"), "/mocks/Face_Mock_Enroll.json")).unwrap());
+        for gray_byte in 0..=u8::MAX{
+            for i in 0..w.len(){
+                w[i] = gray_byte;
+                assert_eq!(quantize_to_gray(&dequantize(&w, &offsets), &offsets), w, "Erreur dans la déquantification au test {i}, octet {gray_byte:08b}");
+            }
         }
     }
 
@@ -378,21 +448,9 @@ mod tests {
         }
     }
 
-    /*
+    // Vérification de correction d'erreur sur un unique bit avec le 7ème bit (bit de parité) modifié
     #[test]
-    fn test_hamming74_7th_bit_noise(){
-        for nibble in 0u8..1<<N{
-            let cw = hamming74_encode_nibble(nibble);
-            let noisy_cw_7th_bit = cw ^ (1<<N);
-            let nibble_corrected = hamming74_decode_nibble(noisy_cw_7th_bit);
-            assert_eq!(nibble_corrected, nibble, "Correction non-nécessaire de {} avec modification du codeword au bit 7 :
-            cw = {:07b}, noisy_cw = {:07b}", nibble, cw, noisy_cw_7th_bit);
-        }
-    }
-    */
-
-    #[test]
-    fn test_hamming74_7th_bit_noise_and_single_bit_noise_correction(){
+    fn test_hamming74_7th_bit_noise_and_single_bit_noise_correction() {
         for nibble in 0u8..(1 << K) {
             let cw = hamming74_encode_nibble(nibble);
             for i in 0..N {
