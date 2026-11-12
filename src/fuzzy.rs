@@ -581,9 +581,9 @@ mod tests {
                             num_bad_fail += 1;
                         }
                     }
-                    Err(_) => {
+                    Err(str) => {
                         num_clean_fail += 1;
-                        //println!("Erreur : la clé n'a pas pu être reconstruite");
+                        //println!("{str}");
                     }
                 }
             }
