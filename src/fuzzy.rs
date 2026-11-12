@@ -33,6 +33,12 @@ pub struct EnrollmentOutput {
 /// * QUANT_STEP = 0.05 veut dire que chaque dimension du vecteur biométrique est quantifiée par pas de 0.05
 const QUANT_STEP: f32 = 0.05;
 
+/// Constante représentant la taille d'une demi-cellule
+const HALF_CELL: f32 = 0.5;
+
+/// Constante représentant l'origine de la grille de quantification (borne inférieure de la case 0)
+const GRID_ORIGIN: f32 = -2.0;
+
 /// Conversion d'un entier binaire en code Gray
 /// XOR entre le nombre et son décalage à droite de 1 bit
 /// # Argument
@@ -129,13 +135,27 @@ fn hamming74_decode_nibble(mut cw: u8) -> u8 {
     d0 | (d1 << 1) | (d2 << 2) | (d3 << 3)
 }
 
+/// Fonction auxiliaire pour trouver le centre d'une cellule
+/// # Arguments
+/// * idx : numéro de la cellule
+/// # Retour
+/// * Centre de la cellule
+fn find_cell_center(idx: i32) -> f32 {
+    (idx as f32 + HALF_CELL) * QUANT_STEP + GRID_ORIGIN
+}
+
+/// Génère les offsets pour ramener les valeurs au centre des cellules
+/// # Arguments
+/// * face_master : vecteur de flottants (données biométriques)
+/// # Retour
+/// * Vecteur des offsets par dimension
 fn generate_grid_offsets(face_master: &[f32]) -> Vec<f32> {
     let mut grid_offsets = Vec::with_capacity(face_master.len());
     for &val in face_master.iter() {
         // base_idx : numéro de cellule contenant val
-        let base_idx = ((val + 2.0) / QUANT_STEP) as i32;
+        let base_idx = ((val - GRID_ORIGIN) / QUANT_STEP) as i32;
         // cell_center : centre de la cellule contenant val (numéro de cellule = base_idx)
-        let cell_center = (base_idx as f32 + 0.5) * QUANT_STEP - 2.0;
+        let cell_center = find_cell_center(base_idx);
         // val - cell_center : offset pour ramener val au centre de la cellule de quantification
         grid_offsets.push(val - cell_center);
     }
@@ -156,10 +176,10 @@ fn quantize_to_gray(vector: &[f32], offsets: &[f32]) -> Vec<u8> {
         let off = offsets.get(i).copied().unwrap_or(0.0);
         // Décalage (retour au centre de la cellule)
         // val - off : valeur centrée sur la cellule de quantification
-        // + 2.0 : translation basée sur l'hypothèse que les valeurs seront toujours > -2.0
+        // - GRID_ORIGIN : translation basée sur l'hypothèse que les valeurs seront toujours > GRID_ORIGIN
         // / QUANT_STEP : quantification en pas de QUANT_STEP pour obtenir un index
         // shifted : valeur flottante quantifiée avant conversion en entier
-        let shifted = (val - off + 2.0) / QUANT_STEP;
+        let shifted = (val - off - GRID_ORIGIN) / QUANT_STEP;
         // Quantification en entier u8 (de 0 à 255) avant la conversion en code de Gray
         // idx : index/numéro de case quantifié en entier u8 (0-255) pour la dimension i
         let idx = if shifted < 0.0 {
