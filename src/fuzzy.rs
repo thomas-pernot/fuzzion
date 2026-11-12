@@ -309,10 +309,10 @@ mod tests {
     const FLOAT_TOLERANCE: f32 = 1e-5;
     // Nombre d'itération dans les boucles de test
     const NUM_TEST: u32 = 1000;
-    
+
     use super::*;
     use crate::utils::read_face_vector_from_json;
-    use rand::{rngs::StdRng, SeedableRng, seq::SliceRandom};
+    use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 
     /// Vérifie que pour chaque indice de cellule (idx)
     /// binary_gray(idx) diffère de binary_gray(idx+1) exactement d'un bit (i.e., la quantification est stable)
@@ -406,17 +406,27 @@ mod tests {
         }
     }
 
-    /// Vérifie que la quantification et la déquantification sur 
+    /// Vérifie que la quantification et la déquantification sur
     /// chaque valeur d’octet dans chaque dimension d'un vecteur biométrique maître sont cohérentes
     /// (les dimensions étant indépendantes)
     #[test]
-    fn test_quantize_dequantize_all(){
+    fn test_quantize_dequantize_all() {
         let mut w = [0; 8];
-        let offsets = generate_grid_offsets(&read_face_vector_from_json(concat!(env!("CARGO_MANIFEST_DIR"), "/mocks/Face_Mock_Enroll.json")).unwrap());
-        for gray_byte in 0..=u8::MAX{
-            for i in 0..w.len(){
+        let offsets = generate_grid_offsets(
+            &read_face_vector_from_json(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/mocks/Face_Mock_Enroll.json"
+            ))
+            .unwrap(),
+        );
+        for gray_byte in 0..=u8::MAX {
+            for i in 0..w.len() {
                 w[i] = gray_byte;
-                assert_eq!(quantize_to_gray(&dequantize(&w, &offsets), &offsets), w, "Erreur dans la déquantification au test {i}, octet {gray_byte:08b}");
+                assert_eq!(
+                    quantize_to_gray(&dequantize(&w, &offsets), &offsets),
+                    w,
+                    "Erreur dans la déquantification au test {i}, octet {gray_byte:08b}"
+                );
             }
         }
     }
@@ -494,11 +504,13 @@ mod tests {
         );
     }
 
-    fn add_noise(w: &[u8], num_inv_bits: u8, rng : &mut StdRng) -> Vec<u8> {
-        let total_bits = w.len() as u8 * 8;
-        assert!(num_inv_bits<total_bits, "num_inv_bits trop grand : {num_inv_bits}");
+    fn add_noise(w: &[u8], num_inv_bits: usize, rng: &mut StdRng) -> Vec<u8> {
+        let total_bits = w.len() * 8;
+        assert!(
+            num_inv_bits < total_bits,
+            "num_inv_bits trop grand : {num_inv_bits}"
+        );
         let mut noisy_w = w.to_vec();
-        let total_bits = noisy_w.len() * 8;
 
         // Slice de toutes les positions de bits
         let positions: Vec<usize> = (0..total_bits).collect();
@@ -506,87 +518,69 @@ mod tests {
         // choose_multiple: échantillonnage sans répétition
         for pos in positions.choose_multiple(rng, num_inv_bits as usize) {
             let byte_idx = *pos / 8;
-            let bit_idx  = (*pos % 8) as u8;
+            let bit_idx = (*pos % 8) as u8;
             noisy_w[byte_idx] ^= 1 << bit_idx;
         }
 
         noisy_w
-    }   
+    }
 
     #[test]
-    fn test_fuzzy_commitment_k_inversed_bits(){
+    fn test_fuzzy_commitment_k_inversed_bits() {
         // Vecteur biométrique maître issu de Face_Mock_Enroll.json
         let enroll_path = concat!(env!("CARGO_MANIFEST_DIR"), "/mocks/Face_Mock_Enroll.json");
         let face_master = read_face_vector_from_json(enroll_path).unwrap();
         // Enrollement
         let enrollment = fuzzy_enroll(&face_master).expect("Erreur : l'enrôlement a échoué");
-        // Récupération de la clé secrète 
+        // Récupération de la clé secrète
         let original_key = enrollment.secret_key;
         // Récupération des offsets
         let grid_offsets = &enrollment.helper_data.grid_offsets;
         // (Re)génération de gray_master (déjà créé dans fuzzy_enroll())
         let gray_master = quantize_to_gray(&face_master, &grid_offsets);
-        // Formatage pour les println! plus tard
-        // let gray_master_bin: String = gray_master
-        //     .iter()
-        //     .map(|byte| format!("{:08b}", byte))
-        //     .collect::<Vec<String>>()
-        //     .join(" ");
         // Génération d'un RNG à partir d'une graine fixe
-        let seed= 42;
+        let seed = 42;
         let mut rng = StdRng::seed_from_u64(seed);
         // Déclaration des compteurs (réussite/échec)
         let mut num_pass;
         let mut num_clean_fail;
         let mut num_bad_fail;
         // Boucle sur le nombre k de bits inversés
-        for num_inv_bits in 0..=8{
+        for num_inv_bits in 0..=8 {
             // Initialisation des compteurs
             num_pass = 0;
             num_clean_fail = 0;
             num_bad_fail = 0;
             // Boucle interne de 1000 échantillons
-            for _ in 1..=NUM_TEST{
+            for _ in 1..=NUM_TEST {
                 // Modification de gray_noisy sur k positions (k bits inversés)
                 let gray_noisy = add_noise(&gray_master, num_inv_bits, &mut rng);
                 // Check qu'on a bien k bits différents entre gray_noisy et gray_master
-                let num_diff_bits : u32 = gray_noisy
+                let num_diff_bits: u32 = gray_noisy
                     .iter()
                     .zip(gray_master.iter())
                     .map(|(byte_noisy, byte_master)| (byte_noisy ^ byte_master).count_ones())
                     .sum();
                 assert_eq!(
-                    num_diff_bits,
-                    num_inv_bits as u32,
+                    num_diff_bits, num_inv_bits as u32,
                     "Le nombre de bits inversés n'est pas cohérent"
                 );
-                
+
                 //Reconstruction de face_noisy (à partir de gray_noisy, déquantification)
                 let face_noisy = dequantize(&gray_noisy, &grid_offsets);
                 // Authentification
                 let authentification = fuzzy_reconstruct(&face_noisy, &enrollment.helper_data);
 
                 //println!("\n------------- Tests sur {num_inv_bits} bits modifiés -------------\n");
-                match authentification{
+                match authentification {
                     Ok(reconstructed_key) => {
-                        if reconstructed_key == original_key{
+                        if reconstructed_key == original_key {
                             num_pass += 1;
                             //println!("Clé reconstruite au bit près")
-                        }
-                        else {
+                        } else {
                             num_bad_fail += 1;
-                            // Formatage pour l'affichage
-                            // let gray_noisy_bin: String = gray_noisy
-                            //     .iter()
-                            //     .map(|byte| format!("{:08b}", byte))
-                            //     .collect::<Vec<String>>()
-                            //     .join(" ");
-                            // println!("Erreur : La clé reconstruite diffère de la clé originale \n
-                            //     gray_master : {gray_master_bin} \n
-                            //     gray_noisy : {gray_noisy_bin} \n
-                            // ")
                         }
-                    },
+                    }
                     Err(_) => {
                         num_clean_fail += 1;
                         //println!("Erreur : la clé n'a pas pu être reconstruite");
@@ -599,11 +593,12 @@ mod tests {
             let success_rate = (num_pass as f64 / num_total as f64) * 100.0;
             println!("Pourcentage de réussite : {:.2} %\n", success_rate);
             match num_inv_bits {
-                0 | 1 => assert_eq!(num_pass, num_total, "Taux de 100% de réussite non-atteint pour num_inv_bits = {num_inv_bits}"),
-                _ => assert_eq!(num_bad_fail, 0, "Echec anormal détecté")
+                0 | 1 => assert_eq!(
+                    num_pass, num_total,
+                    "Taux de 100% de réussite non-atteint pour num_inv_bits = {num_inv_bits}"
+                ),
+                _ => assert_eq!(num_bad_fail, 0, "Echec anormal détecté"),
             }
         }
-        
-
     }
 }
