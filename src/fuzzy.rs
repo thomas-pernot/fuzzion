@@ -307,8 +307,10 @@ mod tests {
     /// Très petite devant une demi-case (0,025) : une erreur d'arrondi ne peut pas
     /// faire changer de case, mais une vraie erreur de formule serait détectée.
     const FLOAT_TOLERANCE: f32 = 1e-5;
+    
     use super::*;
     use crate::utils::read_face_vector_from_json;
+    use rand::{rngs::StdRng, SeedableRng, seq::SliceRandom};
 
     /// Vérifie que pour chaque indice de cellule (idx)
     /// binary_gray(idx) diffère de binary_gray(idx+1) exactement d'un bit (i.e., la quantification est stable)
@@ -468,14 +470,12 @@ mod tests {
     #[test]
     fn test_go_no_go_fuzzy_commitment() {
         // Vecteur biométrique maître issu de Face_Mock_Enroll.json
-        let face_master = [
-            0.4512, 0.8954, -0.1245, 0.6721, -0.3318, 0.2190, 0.5541, -0.7845,
-        ];
+        let enroll_path = concat!(env!("CARGO_MANIFEST_DIR"), "/mocks/Face_Mock_Enroll.json");
+        let face_master = read_face_vector_from_json(enroll_path).unwrap();
 
         // Vecteur bruité issu de Face_Mock_Auth.json (Nouvelle capture)
-        let face_new = [
-            0.4515, 0.8951, -0.1240, 0.6718, -0.3321, 0.2194, 0.5538, -0.7841,
-        ];
+        let auth_path = concat!(env!("CARGO_MANIFEST_DIR"), "/mocks/Face_Mock_Auth.json");
+        let face_new = read_face_vector_from_json(auth_path).unwrap();
 
         // 1. ENRÔLEMENT : Création de la clé originelle et du Helper Data
         let enrollment = fuzzy_enroll(&face_master).expect("Erreur : l'enrôlement a échoué");
@@ -490,5 +490,91 @@ mod tests {
             original_key, reconstructed_key,
             "NO-GO : La clé reconstruite n'est pas identique à l'originale au bit près !"
         );
+    }
+
+    fn add_noise(w: &[u8], num_inv_bits: u8, rng : &mut StdRng) -> Vec<u8> {
+        assert!(num_inv_bits<64, "num_inv_bits trop grand : {num_inv_bits}");
+        let mut noisy_w = w.to_vec();
+        let total_bits = noisy_w.len() * 8;
+
+        // Slice de toutes les positions de bits
+        let positions: Vec<usize> = (0..total_bits).collect();
+
+        // choose_multiple: échantillonnage sans répétition
+        for pos in positions.choose_multiple(rng, num_inv_bits as usize) {
+            let byte_idx = *pos / 8;
+            let bit_idx  = (*pos % 8) as u8;
+            noisy_w[byte_idx] ^= 1 << bit_idx;
+        }
+
+        noisy_w
+    }   
+
+    #[test]
+    fn test_fuzzy_commitment_k_inversed_bits(){
+        // Vecteur biométrique maître issu de Face_Mock_Enroll.json
+        let enroll_path = concat!(env!("CARGO_MANIFEST_DIR"), "/mocks/Face_Mock_Enroll.json");
+        let face_master = read_face_vector_from_json(enroll_path).unwrap();
+        // Enrollement
+        let enrollment = fuzzy_enroll(&face_master).expect("Erreur : l'enrôlement a échoué");
+        // Récupération de la clé secrète 
+        let original_key = enrollment.secret_key;
+        // Récupération des offsets
+        let grid_offsets = &enrollment.helper_data.grid_offsets;
+        // (Re)génération de gray_master (déjà créé dans fuzzy_enroll())
+        let gray_master = quantize_to_gray(&face_master, &grid_offsets);
+        // Formatage pour les println! plus tard
+        let gray_master_bin: String = gray_master
+            .iter()
+            .map(|byte| format!("{:08b}", byte))
+            .collect::<Vec<String>>()
+            .join(" ");
+        // Génération d'un RNG à partir d'une graine fixe
+        let seed= 42;
+        let mut rng = StdRng::seed_from_u64(seed);
+        // Initialisation des compteurs (réussite/échec)
+        let mut num_pass = 0;
+        let mut num_fail = 0;
+        // Boucle sur le nombre k de bits inversés
+        for num_inv_bits in 1..=8{
+            // Modification de gray_noisy sur k positions (k bits inversés)
+            let gray_noisy = add_noise(&gray_master, num_inv_bits, &mut rng);
+            // Formatage pour les println! plus tard
+            let gray_noisy_bin: String = gray_noisy
+                .iter()
+                .map(|byte| format!("{:08b}", byte))
+                .collect::<Vec<String>>()
+                .join(" ");
+            //Reconstruction de face_noisy (à partir de gray_noisy, déquantification)
+            let face_noisy = dequantize(&gray_noisy, &grid_offsets);
+            // Authentification
+            let authentification = fuzzy_reconstruct(&face_noisy, &enrollment.helper_data);
+
+            match authentification{
+                Ok(reconstructed_key) => {
+                    if reconstructed_key == original_key{
+                        num_pass += 1;
+                        println!("Clé reconstruite au bit près pour {num_inv_bits} bits modifiés \n
+                            gray_master : {gray_master_bin} \n
+                            gray_noisy : {gray_noisy_bin} \n
+                        ")
+                    }
+                    else {
+                        num_fail += 1;
+                        println!("Erreur : La clé reconstruite diffère de la clé originale ({num_inv_bits} bits modifiés) \n
+                            gray_master : {gray_master_bin} \n
+                            gray_noisy : {gray_noisy_bin} \n
+                        ")
+                    }
+                },
+                Err(_) => {
+                    num_fail += 1;
+                    println!("Erreur : la clé n'a pas pu être reconstruite");
+                }
+            }
+            let num_total = num_fail + num_pass;
+            println!("================== Résultats pour une modification de {num_inv_bits} bits ==================");
+            println!(" Réussites : {num_pass}/{num_total}, Echecs : {num_fail}/{num_total}");
+        }
     }
 }
