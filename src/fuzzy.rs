@@ -44,6 +44,22 @@ fn binary_to_gray(n: u8) -> u8 {
     n ^ (n >> 1)
 }
 
+/// Conversion d'un entier en code Gray en entier binaire
+/// # Argument
+/// * `y` - entier Gray (0-255)
+/// # Retour
+/// * entier binaire correspondant (0-255)
+#[inline]
+fn gray_to_binary(y: u8) -> u8 {
+    let mut n = y;
+    let mut shift = 1;
+    while shift < 8 {
+        n ^= n >> shift;
+        shift <<= 1;
+    }
+    n
+}
+
 /// Encodage Hamming (7,4) d'un nibble de 4 bits en codeword de 7 bits avec bits de parité pour correction d'erreurs
 /// # Arguments
 /// * `d` - nibble (demi-octet) de 4 bits (0-15)
@@ -303,6 +319,14 @@ mod tests {
         }
     }
 
+    /// Vérifie que la conversion binaire -> Gray -> binaire est bien l'identité pour tous les indices de cellule (0-255)
+    #[test]
+    fn test_gray_to_binary() {
+        for idx in 0u8..u8::MAX {
+            assert_eq!(gray_to_binary(binary_to_gray(idx)), idx);
+        }
+    }
+
     /// Vérifie que le décodage de l'encodage d'un nibble (demi-octet) est bien égal au nibble original
     #[test]
     fn test_hamming74_encode_decode() {
@@ -328,6 +352,35 @@ mod tests {
                 assert_eq!(
                     nibble_corrected, nibble,
                     "Erreur sur la correction de {} avec modification du hamming code au bit {} : cw = {:07b}, noisy_cw = {:07b}",
+                    nibble, i, cw, noisy_cw
+                );
+            }
+        }
+    }
+
+    /*
+    #[test]
+    fn test_hamming74_7th_bit_noise(){
+        for nibble in 0u8..1<<N{
+            let cw = hamming74_encode_nibble(nibble);
+            let noisy_cw_7th_bit = cw ^ (1<<N);
+            let nibble_corrected = hamming74_decode_nibble(noisy_cw_7th_bit);
+            assert_eq!(nibble_corrected, nibble, "Correction non-nécessaire de {} avec modification du codeword au bit 7 :
+            cw = {:07b}, noisy_cw = {:07b}", nibble, cw, noisy_cw_7th_bit);
+        }
+    }
+    */
+
+    #[test]
+    fn test_hamming74_7th_bit_noise_and_single_bit_noise_correction(){
+        for nibble in 0u8..(1 << K) {
+            let cw = hamming74_encode_nibble(nibble);
+            for i in 0..N {
+                let noisy_cw = cw ^ (1 << i) ^ (1 << N);
+                let nibble_corrected = hamming74_decode_nibble(noisy_cw);
+                assert_eq!(
+                    nibble_corrected, nibble,
+                    "Erreur sur la correction de {} avec modification du codeword au bit {} et bit 7: cw = {:07b}, noisy_cw = {:07b}",
                     nibble, i, cw, noisy_cw
                 );
             }
