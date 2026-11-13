@@ -1,13 +1,7 @@
 //! Arithmetics of the Galois Field needed for the BCH code in the fuzzy commitment
 
-// Declaration of the constants of the field GF(2^6)
-
-// Generator of the field : polynomial alpha = X "=" 0b000010 "=" 2
-const ALPHA: usize = 2;
-
-const GROUP_EXPONENT: usize = 6;
 // #(GF(2^6))
-const CARDINALITY: usize = 1 << GROUP_EXPONENT;
+const CARDINALITY: usize = 1 << 6;
 // w(alpha) : order of the generator alpha
 const ORDER: usize = CARDINALITY - 1;
 // p(X) = X^6 + X + 1
@@ -87,7 +81,7 @@ mod tests {
             assert_eq!(
                 exp_table[i - ORDER],
                 exp_table[i],
-                "Different values found at"
+                "Different values found at {i} ({}) and {} ({})", exp_table[i], i-ORDER, exp_table[i-ORDER]
             );
         }
     }
@@ -97,7 +91,7 @@ mod tests {
     fn test_back_and_forth() {
         let exp_table= EXP_LOG_TABLES.0;
         let log_table = EXP_LOG_TABLES.1;
-        for i in 1..ORDER {
+        for i in 1..=ORDER {
             // We do not check the case i=0 since log(0) is not defined
             assert_eq!(
                 exp_table[log_table[i]], i,
@@ -106,6 +100,8 @@ mod tests {
                 exp_table[log_table[{i}] = {}",
                 log_table[i], exp_table[log_table[i]]
             );
+        }
+        for i in 0..ORDER {
             assert_eq!(
                 log_table[exp_table[i]], i,
                 "Back and forth gave a wrong value at index {i} :\n
