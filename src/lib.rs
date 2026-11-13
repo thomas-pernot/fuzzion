@@ -1,6 +1,7 @@
 extern crate alloc;
 
 pub mod fuzzy;
+pub mod gf64;
 pub mod memory;
 pub mod utils;
 pub mod zkp;
