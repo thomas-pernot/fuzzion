@@ -1,13 +1,16 @@
+//! This file implements the fuzzy commitment of a biometric vector (enrollment and authentication),
+//! which derives a secret key K and reconstructs it bit for bit.
+
 use alloc::vec::Vec;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-/// Données publiques d'aide (Helper Data) stockées ou transmises sans risque
-/// # Champs
-/// grid_offsets : offsets pour chaque dimension - ramène les valeurs au centre de la cellule de quantification
-/// commitment_mask : masque de correction d'erreurs pour chaque dimension - utilisé pour corriger les erreurs lors de l'authentification
-/// key_verification_tag : hash SHA256 de la clé secrète K pour vérification lors de l'authentification
+/// Public helper data, safe to store or transmit
+/// # Fields
+/// grid_offsets: per-dimension offsets - bring each value back to the center of its quantization cell
+/// commitment_mask: per-dimension error-correction mask - used to correct errors during authentication
+/// key_verification_tag: SHA-256 hash of the secret key K, used to verify the reconstruction during authentication
 #[derive(Clone, Debug, Zeroize)]
 pub struct FuzzyHelperData {
     pub grid_offsets: Vec<f32>,
@@ -15,10 +18,10 @@ pub struct FuzzyHelperData {
     pub key_verification_tag: [u8; 32],
 }
 
-/// Résultat d'enrôlement contenant la clé secrète K (zéroïsée au Drop)
-/// # Champs
-/// secret_key : clé secrète K de 32 octets (zéroïsée au Drop)
-/// helper_data : données publiques d'aide (Helper Data) pour l'authentification (non-zéroïsée)
+/// Enrollment result containing the secret key K (zeroized on drop)
+/// # Fields
+/// secret_key: 32-byte secret key K (zeroized on drop)
+/// helper_data: public helper data used for authentication (not zeroized)
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct EnrollmentOutput {
     pub secret_key: [u8; 32],
@@ -26,36 +29,36 @@ pub struct EnrollmentOutput {
     pub helper_data: FuzzyHelperData,
 }
 
-/// Constante de quantification pour le codage en code de Gray
-/// Représente la largeur d'une case/cellule de quantification pour chaque dimension du vecteur biométrique
-/// Chaque dimension est ramenée à un numéro de case/cellule
+/// Quantization step used before Gray coding
+/// Width of a quantization cell for each dimension of the biometric vector
+/// Each dimension is mapped to a cell number
 /// # Example
-/// * QUANT_STEP = 0.05 veut dire que chaque dimension du vecteur biométrique est quantifiée par pas de 0.05
+/// * QUANT_STEP = 0.05 means that each dimension of the biometric vector is quantized in steps of 0.05
 const QUANT_STEP: f32 = 0.05;
 
-/// Constante représentant la taille d'une demi-cellule
+/// Position of the cell center, as a fraction of the cell width
 const HALF_CELL: f32 = 0.5;
 
-/// Constante représentant l'origine de la grille de quantification (borne inférieure de la case 0)
+/// Origin of the quantization grid (lower bound of cell 0)
 const GRID_ORIGIN: f32 = -2.0;
 
-/// Conversion d'un entier binaire en code Gray
-/// XOR entre le nombre et son décalage à droite de 1 bit
+/// Converts a binary integer to Gray code
+/// XOR between the number and itself shifted right by 1 bit
 /// # Argument
-/// * `n` - entier binaire (0-255)
-/// # Retour
-/// * entier Gray correspondant (0-255)
+/// * `n` - binary integer (0-255)
+/// # Returns
+/// * corresponding Gray-coded integer (0-255)
 #[inline]
 fn binary_to_gray(n: u8) -> u8 {
     n ^ (n >> 1)
 }
 
-/// Encodage Hamming (7,4) d'un nibble de 4 bits en codeword de 7 bits avec bits de parité pour correction d'erreurs
+/// Hamming (7,4) encoding of a 4-bit nibble into a 7-bit codeword with parity bits for error correction
 /// # Arguments
-/// * `d` - nibble (demi-octet) de 4 bits (0-15)
-/// # Retour
-/// * codeword de 7 bits (0-127) avec bits de parité pour correction d'erreurs
-/// # Exemple
+/// * `d` - 4-bit nibble (half byte) (0-15)
+/// # Returns
+/// * 7-bit codeword (0-127) with parity bits for error correction
+/// # Example
 /// * d = 0b1010 (10)
 /// * d0 = 0, d1 = 1, d2 = 0, d3 = 1
 /// * p0 = d0 ^ d1 ^ d3 = 0 ^ 1 ^ 1 = 0
@@ -64,36 +67,36 @@ fn binary_to_gray(n: u8) -> u8 {
 /// * codeword = 0b0100101 (p0 p1 d0 p2 d1 d2 d3)
 #[inline]
 fn hamming74_encode_nibble(d: u8) -> u8 {
-    // Extraction des bits de données d0, d1, d2, d3 du nibble d
+    // Extract the data bits d0, d1, d2, d3 from the nibble d
     let d0 = (d >> 0) & 1;
     let d1 = (d >> 1) & 1;
     let d2 = (d >> 2) & 1;
     let d3 = (d >> 3) & 1;
-    // Calcul des bits de parité p0, p1, p2 selon les formules de Hamming (7,4)
+    // Compute the parity bits p0, p1, p2 using the Hamming (7,4) formulas
     let p0 = d0 ^ d1 ^ d3;
     let p1 = d0 ^ d2 ^ d3;
     let p2 = d1 ^ d2 ^ d3;
-    // Assemblage du codeword de 7 bits (p0 p1 d0 p2 d1 d2 d3)
+    // Assemble the 7-bit codeword (p0 p1 d0 p2 d1 d2 d3)
     (p0 << 0) | (p1 << 1) | (d0 << 2) | (p2 << 3) | (d1 << 4) | (d2 << 5) | (d3 << 6)
 }
 
-/// Décodage Hamming (7,4) d'un codeword de 7 bits en nibble de 4 bits avec correction d'erreurs
+/// Hamming (7,4) decoding of a 7-bit codeword into a 4-bit nibble with error correction
 /// # Arguments
-/// * `cw` - codeword de 7 bits (0-127) avec bits de parité pour correction d'erreurs
-/// # Retour
-/// * nibble de 4 bits (0-15) après correction d'erreurs
-/// # Exemple
+/// * `cw` - 7-bit codeword (0-127) with parity bits for error correction
+/// # Returns
+/// * 4-bit nibble (0-15) after error correction
+/// # Example
 /// * cw = 0b0100101 (p0 p1 d0 p2 d1 d2 d3)
 /// * b0 = 0, b1 = 1, b2 = 0, b3 = 0, b4 = 1, b5 = 0, b6 = 1
 /// * s0 = b0 ^ b2 ^ b4 ^ b6 = 0 ^ 0 ^ 1 ^ 1 = 0
 /// * s1 = b1 ^ b2 ^ b5 ^ b6 = 1 ^ 0 ^ 0 ^ 1 = 0
 /// * s2 = b3 ^ b4 ^ b5 ^ b6 = 0 ^ 1 ^ 0 ^ 1 = 0
-/// * syndrome = 0b000 = 0 (pas d'erreur)
+/// * syndrome = 0b000 = 0 (no error)
 /// * d0 = b2 = 0, d1 = b4 = 1, d2 = b5 = 0, d3 = b6 = 1
 /// * nibble = 0b1010 (10)
 #[inline]
 fn hamming74_decode_nibble(mut cw: u8) -> u8 {
-    // Extraction des bits du codeword de 7 bits (b0 à b6)
+    // Extract the bits of the 7-bit codeword (b0 to b6)
     let b0 = (cw >> 0) & 1;
     let b1 = (cw >> 1) & 1;
     let b2 = (cw >> 2) & 1;
@@ -101,71 +104,71 @@ fn hamming74_decode_nibble(mut cw: u8) -> u8 {
     let b4 = (cw >> 4) & 1;
     let b5 = (cw >> 5) & 1;
     let b6 = (cw >> 6) & 1;
-    // Calcul du syndrome pour détecter et corriger une erreur unique
+    // Compute the syndrome to detect and correct a single error
     let s0 = b0 ^ b2 ^ b4 ^ b6;
     let s1 = b1 ^ b2 ^ b5 ^ b6;
     let s2 = b3 ^ b4 ^ b5 ^ b6;
     let syndrome = s0 | (s1 << 1) | (s2 << 2);
-    // Correction d'une erreur unique si le syndrome est non nul (1 à 7)
+    // Correct a single error if the syndrome is non-zero (1 to 7)
     if syndrome > 0 && syndrome <= 7 {
         cw ^= 1 << (syndrome - 1);
     }
-    // Récupération des bits de données d0, d1, d2, d3 après correction
+    // Retrieve the data bits d0, d1, d2, d3 after correction
     let d0 = (cw >> 2) & 1;
     let d1 = (cw >> 4) & 1;
     let d2 = (cw >> 5) & 1;
     let d3 = (cw >> 6) & 1;
-    // Reconstruction du nibble de 4 bits à partir des bits de données corrigés
+    // Rebuild the 4-bit nibble from the corrected data bits
     d0 | (d1 << 1) | (d2 << 2) | (d3 << 3)
 }
 
-/// Fonction auxiliaire pour trouver le centre d'une cellule
+/// Helper function computing the center of a cell
 /// # Arguments
-/// * idx : numéro de la cellule
-/// # Retour
-/// * Centre de la cellule
+/// * idx: cell number
+/// # Returns
+/// * Center of the cell
 fn find_cell_center(idx: i32) -> f32 {
     (idx as f32 + HALF_CELL) * QUANT_STEP + GRID_ORIGIN
 }
 
-/// Génère les offsets pour ramener les valeurs au centre des cellules
+/// Generates the offsets that bring each value back to the center of its cell
 /// # Arguments
-/// * face_master : vecteur de flottants (données biométriques)
-/// # Retour
-/// * Vecteur des offsets par dimension
+/// * face_master: vector of floats (biometric data)
+/// # Returns
+/// * Vector of per-dimension offsets
 fn generate_grid_offsets(face_master: &[f32]) -> Vec<f32> {
     let mut grid_offsets = Vec::with_capacity(face_master.len());
     for &val in face_master.iter() {
-        // base_idx : numéro de cellule contenant val
+        // base_idx: number of the cell containing val
         let base_idx = ((val - GRID_ORIGIN) / QUANT_STEP) as i32;
-        // cell_center : centre de la cellule contenant val (numéro de cellule = base_idx)
+        // cell_center: center of the cell containing val (cell number = base_idx)
         let cell_center = find_cell_center(base_idx);
-        // val - cell_center : offset pour ramener val au centre de la cellule de quantification
+        // val - cell_center: offset bringing val back to the center of its quantization cell
         grid_offsets.push(val - cell_center);
     }
     grid_offsets
 }
 
-/// Quantification d'un vecteur de flottants en code de Gray avec décalage (offset) pour chaque dimension
+/// Quantizes a vector of floats into Gray code, with a per-dimension offset
 /// # Arguments
-/// * `vector` - vecteur de flottants à quantifier
-/// * `offsets` - vecteur de décalages pour chaque dimension pour ramener les valeurs au centre de la plage de quantification
-/// # Retour
-/// * vecteur de bytes quantifiés en code de Gray   
+/// * `vector` - vector of floats to quantize
+/// * `offsets` - per-dimension offsets bringing the values back to the center of their quantization cell
+/// # Returns
+/// * vector of Gray-coded quantized bytes
 fn quantize_to_gray(vector: &[f32], offsets: &[f32]) -> Vec<u8> {
     let mut out = Vec::with_capacity(vector.len());
-    // val : valeur flottante de la dimension i du vecteur biométrique
+    // val: float value of dimension i of the biometric vector
     for (i, &val) in vector.iter().enumerate() {
-        // Détermination du décalage (off) pour la dimension i, ou 0.0 si non fourni
+        // Offset (off) for dimension i, or 0.0 if not provided
         let off = offsets.get(i).copied().unwrap_or(0.0);
-        // Décalage (retour au centre de la cellule)
-        // val - off : valeur centrée sur la cellule de quantification
-        // - GRID_ORIGIN : translation basée sur l'hypothèse que les valeurs seront toujours > GRID_ORIGIN
-        // / QUANT_STEP : quantification en pas de QUANT_STEP pour obtenir un index
-        // shifted : valeur flottante quantifiée avant conversion en entier
+        // Shift (back to the center of the cell)
+        // val - off: value centered in its quantization cell
+        // - GRID_ORIGIN: translation, assuming values are always > GRID_ORIGIN
+        // / QUANT_STEP: quantization in steps of QUANT_STEP to obtain an index
+        // shifted: quantized float value before conversion to an integer
         let shifted = (val - off - GRID_ORIGIN) / QUANT_STEP;
-        // Quantification en entier u8 (de 0 à 255) avant la conversion en code de Gray
-        // idx : index/numéro de case quantifié en entier u8 (0-255) pour la dimension i
+        // Quantization to a u8 integer (0 to 255) before Gray conversion
+        // idx: quantized cell index/number as a u8 (0-255) for dimension i
         let idx = if shifted < 0.0 {
             0u8
         } else if shifted > 255.0 {
@@ -173,30 +176,30 @@ fn quantize_to_gray(vector: &[f32], offsets: &[f32]) -> Vec<u8> {
         } else {
             shifted as u8
         };
-        // Ajout au vecteur de sortie du code de Gray correspondant à l'index quantifié
+        // Push the Gray code of the quantized index to the output vector
         out.push(binary_to_gray(idx));
     }
     out
 }
 
-// Dérivation de la clé secrète K et du tag de vérification à partir d'une graine brute (raw_seed)
+// Derives the secret key K and the verification tag from a raw seed (raw_seed)
 // # Arguments
-// * `raw_seed` - vecteur de nibbles (4 bits) représentant la graine brute
-// # Retour
-// * tuple contenant la clé secrète K (32 octets) et le tag de vérification (32 octets) pour authentification
+// * `raw_seed` - vector of 4-bit nibbles forming the raw seed
+// # Returns
+// * tuple containing the secret key K (32 bytes) and the verification tag (32 bytes) used for authentication
 fn derive_key_and_tag(raw_seed: &[u8]) -> ([u8; 32], [u8; 32]) {
-    // Création d'un hasher SHA256 pour dériver la clé K à partir de la graine brute
+    // SHA-256 hasher deriving the key K from the raw seed
     let mut hasher_k = Sha256::new();
-    // Hash de la graine brute avec un préfixe pour éviter les collisions
+    // Hash the raw seed with a domain-separation prefix to avoid collisions
     hasher_k.update(b"HUMANVAULT_KEY_V1:");
     hasher_k.update(raw_seed);
     let k_digest = hasher_k.finalize();
-    // Copie du digest SHA256 dans un tableau fixe de 32 octets pour la clé K
-    // Format attendu par le reste du code
+    // Copy the SHA-256 digest into a fixed 32-byte array for the key K
+    // Format expected by the rest of the code
     let mut key = [0u8; 32];
     key.copy_from_slice(&k_digest);
 
-    // Actions similaires pour dériver le tag de vérification à partir de la clé K
+    // Same steps to derive the verification tag from the key K
     let mut hasher_tag = Sha256::new();
     hasher_tag.update(b"HUMANVAULT_TAG_V1:");
     hasher_tag.update(&key);
@@ -207,47 +210,47 @@ fn derive_key_and_tag(raw_seed: &[u8]) -> ([u8; 32], [u8; 32]) {
     (key, tag)
 }
 
-/// ENRÔLEMENT
+/// ENROLLMENT
 /// # Arguments
-/// * `face_master` - vecteur biométrique maître (8 dimensions minimum)
-/// # Retour
-/// * Résultat d'enrôlement contenant la clé secrète K et le Helper Data
+/// * `face_master` - master biometric vector (at least 8 dimensions)
+/// # Returns
+/// * Enrollment result containing the secret key K and the helper data
 pub fn fuzzy_enroll(face_master: &[f32]) -> Result<EnrollmentOutput, &'static str> {
     if face_master.len() < 8 {
-        return Err("Le vecteur biométrique doit comporter au moins 8 dimensions");
+        return Err("The biometric vector must have at least 8 dimensions");
     }
 
-    // Génération des offsets de grille pour chaque dimension du vecteur biométrique maître
+    // Generate the grid offsets for each dimension of the master biometric vector
     let grid_offsets = generate_grid_offsets(face_master);
 
-    // Quantification du vecteur biométrique maître en code de Gray avec les offsets calculés précédemment
+    // Quantize the master biometric vector into Gray code using the offsets computed above
     let gray_master = quantize_to_gray(face_master, &grid_offsets);
 
-    // Hash du code Gray quantifié (master_digest)
+    // Hash of the quantized Gray code (master_digest)
     let mut seed_hasher = Sha256::new();
     seed_hasher.update(b"HUMANVAULT_MASTER_SEED:");
     seed_hasher.update(&gray_master);
     let master_digest = seed_hasher.finalize();
 
-    // commitment_mask : utilisé pour corriger les erreurs lors de l'authentification
+    // commitment_mask: used to correct errors during authentication
     let mut commitment_mask = Vec::with_capacity(gray_master.len());
-    // canonical_seed : utilisé plus tard pour dériver la clé secrète K et le tag de vérification
+    // canonical_seed: later used to derive the secret key K and the verification tag
     let mut canonical_seed = Vec::with_capacity(gray_master.len());
 
-    // Génération du commitment mask et de la canonical seed à partir du code Gray et de son digest
+    // Build the commitment mask and the canonical seed from the Gray code and its digest
     for (i, &g_byte) in gray_master.iter().enumerate() {
-        // nibble : 4 bits dérivés du digest maître pour introduire de l'aléatoire dans la graine canonique
+        // nibble: 4 bits derived from the master digest, adding randomness to the canonical seed
         let nibble = (master_digest[i % 32] ^ (i as u8)) & 0x0F;
         canonical_seed.push(nibble);
-        // codeword : code de Hamming (7,4) du nibble pour correction d'erreurs
+        // codeword: Hamming (7,4) code of the nibble, for error correction
         let codeword = hamming74_encode_nibble(nibble);
-        // commitment_mask : concaténation des XOR entre le codeword et le code Gray quantifié (g_byte) pour chaque dimension
+        // commitment_mask: XOR between the codeword and the quantized Gray code (g_byte), for each dimension
         commitment_mask.push(codeword ^ g_byte);
     }
 
-    // Dérivation de la clé secrète K et du tag de vérification à partir de la graine canonique
+    // Derive the secret key K and the verification tag from the canonical seed
     let (secret_key, key_verification_tag) = derive_key_and_tag(&canonical_seed);
-    // Zéroïsation de la graine canonique pour éviter toute fuite de données sensibles
+    // Zeroize the canonical seed to prevent any leak of sensitive data
     canonical_seed.zeroize();
 
     Ok(EnrollmentOutput {
@@ -260,62 +263,62 @@ pub fn fuzzy_enroll(face_master: &[f32]) -> Result<EnrollmentOutput, &'static st
     })
 }
 
-/// AUTHENTIFICATION (Reconstruction de la clé K)
+/// AUTHENTICATION (reconstruction of the key K)
 pub fn fuzzy_reconstruct(
     face_new: &[f32],
     helper: &FuzzyHelperData,
 ) -> Result<[u8; 32], &'static str> {
     if face_new.len() != helper.commitment_mask.len() || face_new.len() != helper.grid_offsets.len()
     {
-        return Err("Dimension du vecteur incompatible avec le Helper Data");
+        return Err("Vector dimension incompatible with the helper data");
     }
 
     let mut gray_new = quantize_to_gray(face_new, &helper.grid_offsets);
     let mut recovered_seed = Vec::with_capacity(face_new.len());
 
     for (i, &g_byte) in gray_new.iter().enumerate() {
-        // Récupération du codeword bruité en XORant le code Gray quantifié avec le commitment mask
+        // Recover the noisy codeword by XORing the quantized Gray code with the commitment mask
         let noisy_codeword = helper.commitment_mask[i] ^ g_byte;
-        // Correction d'erreurs avec le décodage Hamming (7,4) pour récupérer le nibble original
+        // Error correction with Hamming (7,4) decoding to recover the original nibble
         let corrected_nibble = hamming74_decode_nibble(noisy_codeword);
         recovered_seed.push(corrected_nibble);
     }
 
-    // Zéroïsation du vecteur quantifié pour éviter toute fuite de données sensibles
+    // Zeroize the quantized vector to prevent any leak of sensitive data
     gray_new.zeroize();
-    // Récupération de la clé secrète K et du tag de vérification à partir de la graine récupérée
+    // Recover the secret key K and the verification tag from the recovered seed
     let (mut candidate_key, candidate_tag) = derive_key_and_tag(&recovered_seed);
-    // Zéroïsation de la graine récupérée pour éviter toute fuite de données sensibles
+    // Zeroize the recovered seed to prevent any leak of sensitive data
     recovered_seed.zeroize();
 
-    // Comparaison du tag de vérification calculé avec celui stocké dans le Helper Data pour valider la reconstruction
+    // Compare the computed verification tag with the one stored in the helper data to validate the reconstruction
     if bool::from(candidate_tag.ct_eq(&helper.key_verification_tag)) {
         Ok(candidate_key)
     } else {
         candidate_key.zeroize();
-        Err("Échec de reconstruction biométrique : bruit supérieur à la capacité de correction")
+        Err("Biometric reconstruction failed: noise exceeds the correction capacity")
     }
 }
 #[cfg(test)]
 mod tests {
-    /// Constantes pour le codage Hamming (N, K)
-    /// N : nombre total de bits du codeword (7 bits pour Hamming (7,4))
-    /// K : nombre de bits de données (4 bits pour un nibble)
+    /// Constants for the Hamming (N, K) code
+    /// N: total number of bits in the codeword (7 bits for Hamming (7,4))
+    /// K: number of data bits (4 bits for a nibble)
     const N: u32 = 7;
     const K: u32 = 4;
-    /// Tolérance pour comparer des flottants reconstruits.
-    /// Très petite devant une demi-case (0,025) : une erreur d'arrondi ne peut pas
-    /// faire changer de case, mais une vraie erreur de formule serait détectée.
+    /// Tolerance used to compare reconstructed floats.
+    /// Very small compared to half a cell (0.025): a rounding error cannot
+    /// change the cell, but a genuine formula error would be detected.
     const FLOAT_TOLERANCE: f32 = 1e-5;
-    // Nombre d'itération dans les boucles de test
+    // Number of iterations in the test loops
     const NUM_TEST: u32 = 1000;
 
     use super::*;
     use crate::utils::read_face_vector_from_json;
     use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 
-    /// Vérifie que pour chaque indice de cellule (idx)
-    /// binary_gray(idx) diffère de binary_gray(idx+1) exactement d'un bit (i.e., la quantification est stable)
+    /// Checks that for each cell index (idx),
+    /// binary_to_gray(idx) differs from binary_to_gray(idx+1) by exactly one bit (i.e., the quantization is stable)
     #[test]
     fn test_gray_adjacent_indices_differ_by_one_bit() {
         for idx in 0u8..u8::MAX {
@@ -323,7 +326,7 @@ mod tests {
             assert_eq!(
                 xor_gray_idx.count_ones(),
                 1,
-                "Cellule instable entre {} (gray code = {:08b}) et {} (gray code = {:08b})",
+                "Unstable cell between {} (gray code = {:08b}) and {} (gray code = {:08b})",
                 idx,
                 binary_to_gray(idx),
                 idx + 1,
@@ -332,11 +335,11 @@ mod tests {
         }
     }
 
-    /// Conversion d'un entier en code Gray en entier binaire
+    /// Converts a Gray-coded integer back to a binary integer
     /// # Argument
-    /// * `y` - entier Gray (0-255)
-    /// # Retour
-    /// * entier binaire correspondant (0-255)
+    /// * `y` - Gray-coded integer (0-255)
+    /// # Returns
+    /// * corresponding binary integer (0-255)
     #[inline]
     fn gray_to_binary(y: u8) -> u8 {
         let mut n = y;
@@ -348,30 +351,30 @@ mod tests {
         n
     }
 
-    /// Déquantification d'un vecteur de bytes en code de Gray en flottants avec décalage (offset) pour chaque dimension
+    /// Dequantizes a vector of Gray-coded bytes into floats, with a per-dimension offset
     /// # Arguments
-    /// * `w` - vecteur de bytes quantifiés en code de Gray
-    /// * `offsets` - vecteur de décalages pour chaque dimension pour ramener
-    /// les valeurs au centre de la plage de quantification
-    /// # Retour
-    /// * vecteur de flottants déquantifiés
+    /// * `w` - vector of Gray-coded quantized bytes
+    /// * `offsets` - per-dimension offsets bringing
+    ///   the values back to the center of their quantization cell
+    /// # Returns
+    /// * vector of dequantized floats
     fn dequantize(w: &[u8], offsets: &[f32]) -> Vec<f32> {
         let mut out = Vec::with_capacity(w.len());
         for (i, &val_byte) in w.iter().enumerate() {
-            // Numéro de cellule contenant val_byte après conversion Gray -> Binaire
+            // Number of the cell containing val_byte, after Gray -> binary conversion
             let idx = gray_to_binary(val_byte) as i32;
-            // Centre de la cellule
+            // Center of the cell
             let cell_center = find_cell_center(idx);
-            // Récupération de l'offset
+            // Offset of dimension i
             let offset = offsets.get(i).copied().unwrap_or(0.0);
-            // Valeur réelle
+            // Actual value
             let val = cell_center + offset;
             out.push(val);
         }
         out
     }
 
-    /// Vérifie que la conversion binaire -> Gray -> binaire est bien l'identité pour tous les indices de cellule (0-255)
+    /// Checks that binary -> Gray -> binary is the identity for every cell index (0-255)
     #[test]
     fn test_gray_to_binary() {
         for idx in 0u8..=u8::MAX {
@@ -379,10 +382,10 @@ mod tests {
         }
     }
 
-    /// Vérifie sur le mock d'enrôlement que :
-    /// 1. dequantize puis quantize redonne le même w (aller-retour sur les octets) ;
-    /// 2. dequantize redonne le vecteur facial d'origine, à FLOAT_TOLERANCE près
-    ///    (car à l'enrôlement, valeur = centre de case + offset).
+    /// Checks on the enrollment mock that:
+    /// 1. dequantize then quantize gives back the same w (round trip on the bytes);
+    /// 2. dequantize gives back the original face vector, within FLOAT_TOLERANCE
+    ///    (since at enrollment, value = cell center + offset).
     #[test]
     fn test_quantize_dequantize_mock() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/mocks/Face_Mock_Enroll.json");
@@ -394,21 +397,21 @@ mod tests {
         assert_eq!(
             quantize_to_gray(&reconstructed, &offsets),
             w,
-            "L'aller-retour dequantize -> quantize ne redonne pas w"
+            "The dequantize -> quantize round trip does not give back w"
         );
 
         for (i, (&original, &rebuilt)) in face_master.iter().zip(reconstructed.iter()).enumerate() {
             let gap = (original - rebuilt).abs();
             assert!(
                 gap < FLOAT_TOLERANCE,
-                "Dimension {i} : original = {original}, reconstruit = {rebuilt}, écart = {gap:e}"
+                "Dimension {i}: original = {original}, rebuilt = {rebuilt}, gap = {gap:e}"
             );
         }
     }
 
-    /// Vérifie que la quantification et la déquantification sur
-    /// chaque valeur d’octet dans chaque dimension d'un vecteur biométrique maître sont cohérentes
-    /// (les dimensions étant indépendantes)
+    /// Checks that quantization and dequantization are consistent for
+    /// every byte value in every dimension of a master biometric vector
+    /// (the dimensions being independent)
     #[test]
     fn test_quantize_dequantize_all() {
         let mut w = [0; 8];
@@ -425,27 +428,27 @@ mod tests {
                 assert_eq!(
                     quantize_to_gray(&dequantize(&w, &offsets), &offsets),
                     w,
-                    "Erreur dans la déquantification au test {i}, octet {gray_byte:08b}"
+                    "Dequantization error in dimension {i}, byte {gray_byte:08b}"
                 );
             }
         }
     }
 
-    /// Vérifie que le décodage de l'encodage d'un nibble (demi-octet) est bien égal au nibble original
+    /// Checks that decoding the encoding of a nibble (half byte) gives back the original nibble
     #[test]
     fn test_hamming74_encode_decode() {
         for nibble in 0u8..(1 << K) {
             assert_eq!(
                 hamming74_decode_nibble(hamming74_encode_nibble(nibble)),
                 nibble,
-                "Erreur lors de l'aller-retour sur {} ({:04b})",
+                "Round-trip error on {} ({:04b})",
                 nibble,
                 nibble
             );
         }
     }
 
-    /// Vérification de correction d'erreur sur un unique bit
+    /// Checks the correction of a single-bit error
     #[test]
     fn test_hamming74_single_bit_noise_correction() {
         for nibble in 0u8..(1 << K) {
@@ -455,14 +458,14 @@ mod tests {
                 let nibble_corrected = hamming74_decode_nibble(noisy_cw);
                 assert_eq!(
                     nibble_corrected, nibble,
-                    "Erreur sur la correction de {} avec modification du hamming code au bit {} : cw = {:07b}, noisy_cw = {:07b}",
+                    "Failed to correct {} with bit {} of the Hamming codeword flipped: cw = {:07b}, noisy_cw = {:07b}",
                     nibble, i, cw, noisy_cw
                 );
             }
         }
     }
 
-    // Vérification de correction d'erreur sur un unique bit avec le 7ème bit (bit de parité) modifié
+    // Checks the correction of a single-bit error when bit 7 (outside the 7-bit codeword, ignored by the decoder) is also flipped
     #[test]
     fn test_hamming74_7th_bit_noise_and_single_bit_noise_correction() {
         for nibble in 0u8..(1 << K) {
@@ -472,7 +475,7 @@ mod tests {
                 let nibble_corrected = hamming74_decode_nibble(noisy_cw);
                 assert_eq!(
                     nibble_corrected, nibble,
-                    "Erreur sur la correction de {} avec modification du codeword au bit {} et bit 7: cw = {:07b}, noisy_cw = {:07b}",
+                    "Failed to correct {} with bit {} and bit 7 of the codeword flipped: cw = {:07b}, noisy_cw = {:07b}",
                     nibble, i, cw, noisy_cw
                 );
             }
@@ -481,26 +484,26 @@ mod tests {
 
     #[test]
     fn test_go_no_go_fuzzy_commitment() {
-        // Vecteur biométrique maître issu de Face_Mock_Enroll.json
+        // Master biometric vector from Face_Mock_Enroll.json
         let enroll_path = concat!(env!("CARGO_MANIFEST_DIR"), "/mocks/Face_Mock_Enroll.json");
         let face_master = read_face_vector_from_json(enroll_path).unwrap();
 
-        // Vecteur bruité issu de Face_Mock_Auth.json (Nouvelle capture)
+        // Noisy vector from Face_Mock_Auth.json (new capture)
         let auth_path = concat!(env!("CARGO_MANIFEST_DIR"), "/mocks/Face_Mock_Auth.json");
         let face_new = read_face_vector_from_json(auth_path).unwrap();
 
-        // 1. ENRÔLEMENT : Création de la clé originelle et du Helper Data
-        let enrollment = fuzzy_enroll(&face_master).expect("Erreur : l'enrôlement a échoué");
+        // 1. ENROLLMENT: create the original key and the helper data
+        let enrollment = fuzzy_enroll(&face_master).expect("Error: enrollment failed");
         let original_key = enrollment.secret_key;
 
-        // 2. AUTHENTIFICATION : Tentative de reconstruction de la clé avec le vecteur bruité
+        // 2. AUTHENTICATION: try to reconstruct the key from the noisy vector
         let reconstructed_key = fuzzy_reconstruct(&face_new, &enrollment.helper_data)
-            .expect("Échec du Go/No-Go : Le bruit biométrique n'a pas pu être corrigé");
+            .expect("Go/No-Go failed: the biometric noise could not be corrected");
 
-        // 3. VERDICT : Comparaison stricte des 32 octets
+        // 3. VERDICT: strict comparison of the 32 bytes
         assert_eq!(
             original_key, reconstructed_key,
-            "NO-GO : La clé reconstruite n'est pas identique à l'originale au bit près !"
+            "NO-GO: the reconstructed key is not bit-for-bit identical to the original!"
         );
     }
 
@@ -508,14 +511,14 @@ mod tests {
         let total_bits = w.len() * 8;
         assert!(
             num_inv_bits < total_bits,
-            "num_inv_bits trop grand : {num_inv_bits}"
+            "num_inv_bits too large: {num_inv_bits}"
         );
         let mut noisy_w = w.to_vec();
 
-        // Slice de toutes les positions de bits
+        // All bit positions
         let positions: Vec<usize> = (0..total_bits).collect();
 
-        // choose_multiple: échantillonnage sans répétition
+        // choose_multiple: sampling without replacement
         for pos in positions.choose_multiple(rng, num_inv_bits as usize) {
             let byte_idx = *pos / 8;
             let bit_idx = (*pos % 8) as u8;
@@ -527,35 +530,35 @@ mod tests {
 
     #[test]
     fn test_fuzzy_commitment_k_inversed_bits() {
-        // Vecteur biométrique maître issu de Face_Mock_Enroll.json
+        // Master biometric vector from Face_Mock_Enroll.json
         let enroll_path = concat!(env!("CARGO_MANIFEST_DIR"), "/mocks/Face_Mock_Enroll.json");
         let face_master = read_face_vector_from_json(enroll_path).unwrap();
-        // Enrollement
-        let enrollment = fuzzy_enroll(&face_master).expect("Erreur : l'enrôlement a échoué");
-        // Récupération de la clé secrète
+        // Enrollment
+        let enrollment = fuzzy_enroll(&face_master).expect("Error: enrollment failed");
+        // Retrieve the secret key
         let original_key = enrollment.secret_key;
-        // Récupération des offsets
+        // Retrieve the offsets
         let grid_offsets = &enrollment.helper_data.grid_offsets;
-        // (Re)génération de gray_master (déjà créé dans fuzzy_enroll())
+        // Regenerate gray_master (already computed inside fuzzy_enroll())
         let gray_master = quantize_to_gray(&face_master, &grid_offsets);
-        // Génération d'un RNG à partir d'une graine fixe
+        // RNG with a fixed seed
         let seed = 42;
         let mut rng = StdRng::seed_from_u64(seed);
-        // Déclaration des compteurs (réussite/échec)
+        // Counters (success / failure)
         let mut num_pass;
         let mut num_clean_fail;
         let mut num_bad_fail;
-        // Boucle sur le nombre k de bits inversés
+        // Loop over the number k of flipped bits
         for num_inv_bits in 0..=8 {
-            // Initialisation des compteurs
+            // Reset the counters
             num_pass = 0;
             num_clean_fail = 0;
             num_bad_fail = 0;
-            // Boucle interne de 1000 échantillons
+            // Inner loop over NUM_TEST samples
             for _ in 1..=NUM_TEST {
-                // Modification de gray_noisy sur k positions (k bits inversés)
+                // Flip k bits of gray_master to get gray_noisy
                 let gray_noisy = add_noise(&gray_master, num_inv_bits, &mut rng);
-                // Check qu'on a bien k bits différents entre gray_noisy et gray_master
+                // Check that gray_noisy and gray_master differ by exactly k bits
                 let num_diff_bits: u32 = gray_noisy
                     .iter()
                     .zip(gray_master.iter())
@@ -563,12 +566,12 @@ mod tests {
                     .sum();
                 assert_eq!(
                     num_diff_bits, num_inv_bits as u32,
-                    "Le nombre de bits inversés n'est pas cohérent"
+                    "Inconsistent number of flipped bits"
                 );
 
-                //Reconstruction de face_noisy (à partir de gray_noisy, déquantification)
+                // Rebuild face_noisy from gray_noisy (dequantization)
                 let face_noisy = dequantize(&gray_noisy, &grid_offsets);
-                // Authentification
+                // Authentication
                 let authentification = fuzzy_reconstruct(&face_noisy, &enrollment.helper_data);
 
                 match authentification {
@@ -585,16 +588,16 @@ mod tests {
                 }
             }
             let num_total = num_clean_fail + num_pass + num_bad_fail;
-            println!("================== Résultats pour une modification de {num_inv_bits} bits ({num_total} échantillons) ==================");
-            println!("Réussites : {num_pass}/{num_total}, Echecs clean : {num_clean_fail}/{num_total}, Echecs anormaux : {num_bad_fail}/{num_total}");
+            println!("================== Results for {num_inv_bits} flipped bits ({num_total} samples) ==================");
+            println!("Successes: {num_pass}/{num_total}, clean failures: {num_clean_fail}/{num_total}, abnormal failures: {num_bad_fail}/{num_total}");
             let success_rate = (num_pass as f64 / num_total as f64) * 100.0;
-            println!("Pourcentage de réussite : {:.2} %\n", success_rate);
+            println!("Success rate: {:.2} %\n", success_rate);
             match num_inv_bits {
                 0 | 1 => assert_eq!(
                     num_pass, num_total,
-                    "Taux de 100% de réussite non-atteint pour num_inv_bits = {num_inv_bits}"
+                    "100% success rate not reached for num_inv_bits = {num_inv_bits}"
                 ),
-                _ => assert_eq!(num_bad_fail, 0, "Echec anormal détecté"),
+                _ => assert_eq!(num_bad_fail, 0, "Abnormal failure detected"),
             }
         }
     }
