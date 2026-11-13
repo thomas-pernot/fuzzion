@@ -571,19 +571,16 @@ mod tests {
                 // Authentification
                 let authentification = fuzzy_reconstruct(&face_noisy, &enrollment.helper_data);
 
-                //println!("\n------------- Tests sur {num_inv_bits} bits modifiés -------------\n");
                 match authentification {
                     Ok(reconstructed_key) => {
                         if reconstructed_key == original_key {
                             num_pass += 1;
-                            //println!("Clé reconstruite au bit près")
                         } else {
                             num_bad_fail += 1;
                         }
                     }
-                    Err(str) => {
+                    Err(_) => {
                         num_clean_fail += 1;
-                        //println!("{str}");
                     }
                 }
             }
